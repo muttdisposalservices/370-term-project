@@ -14,7 +14,7 @@ fds across restart, heartbeat within 60s of start.
 logged. The 48-hour soak is the test suite of last resort.
 - NEVER weaken, skip, or delete a test to make the suite pass.
 ## Ownership
-- TODO
+- TODO (will be added in M2 - Design Document)
 ## Style
 - Systems core: C17, -Wall -Wextra -Werror, no VLAs.
 goto-cleanup for multi-resource functions.

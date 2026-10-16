@@ -28,9 +28,11 @@ The main focus of an audio engineer at 3 AM after 6 hours of raving with no brea
 Which two (or more), and how they COOPERATE (fused, correlated,
 or one pipeline) rather than merely coexist.
 
-One XLR combo jack input (3-pin XLR + 1/4" TRS) to be taken from the mixing desk monitors and collects what the system *should* sound like. This is the reference or "Source Signal", and it will be compared against the "System Signal" later on.
+One XLR combo jack input (3-pin XLR + 1/4" TRS) to be taken from the mixing desk monitors and collects what the system *should* sound like. This is the reference or "Source Signal", and it will be compared against the "System Signal" later on. 
 
-One XLR input takes external input from a microphone (ideally RTA, but doable with anything decent enough to produce a flat signal) to use as what the system *does* sound like. This is the real-world system output (or "System Signal") as it (more or less) would be perceived by a listener.
+One 3-pin XLR input takes external input from a microphone (ideally a real-time analysis microphone, but doable with anything decent enough to produce a flat signal) to use as what the system *does* sound like. This is the real-world system output (or "System Signal") as it (more or less) would be perceived by a listener.
+
+Note: XLR = model X - Latching - with Resilient rubber connector surrounds, TRS = Tip-Ring-Sleeve. These are standard audio connectors used for balanced (and, secondarily, unbalanced) interconnects. Balanced connections usually carry two phase-inverted copies of the signal with a ground pin to allow the receiver to reject common-mode noise applied to both copies.
 
 The signal processor focuses on aligning the Source and System Signals and adding some light system protection. For this assignment, the processor will likely contain equalization (EQ) and dynamic range control (compression, expansion, gating, limiting) to be immediately applicable. The Source Signal is the reference for which the System Signal will compensate, and so the desk input (sensor 1) acts as a control monitor for the microphone input (sensor 2), thus cooperating in an example/learner relationship.
 
