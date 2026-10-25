@@ -13,6 +13,8 @@ fds across restart, heartbeat within 60s of start.
 - Every allocation checked; every syscall’s error path handled and
 logged. The 48-hour soak is the test suite of last resort.
 - NEVER weaken, skip, or delete a test to make the suite pass.
+- Do not write to PROMPTLOG.md.
+- Never push to the repo. This will only be done manually.
 ## Ownership
 - TODO (will be added in M2 - Design Document)
 ## Style

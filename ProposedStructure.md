@@ -26,15 +26,47 @@ Mic  ─► THAT1512 (preamp) ──┘                                         
   slave) exposes one ALSA card with 2 capture channels and 2 playback channels.
 
 ## 2. Base OS configuration
+Everything in this section is versioned under `os/` and `systemd/` and installed by
+`make deploy`. Nothing is hand-edited on the Pi.
 - Raspberry Pi OS Lite (64-bit) with the **PREEMPT_RT** kernel (mainline RT, 6.12+).
-- Cmdline `isolcpus=3 nohz_full=3 rcu_nocbs=3`. Core 3 belongs to the audio thread only.
+  PREEMPT_RT is a build-time option, so it has to come from a kernel package, not a setting.
+  - Install the prebuilt RT kernel from apt. Forum reports give `linux-image-rpi-v8-rt`
+    (labelled experimental, boots on Pi 5). Confirm the exact name with
+    `apt search linux-image-rpi` on the Pi before recording it here.
+  - `apt-mark hold` the RT kernel package so `apt upgrade` can't swap it out during
+    development or the 48 h soak. Release the hold only on purpose, then re-verify.
+  - After every deploy, check `/sys/kernel/realtime` = 1 and `uname -v` shows
+    `PREEMPT_RT`. This catches a deploy where the Pi silently boots a non-RT kernel.
+  - Confirm the benefit by measurement: `cyclictest` worst-case latency on core 3 under
+    load must sit well below the ~0.67 ms period (target < 100 µs). Forum reports show
+    no gain in some setups, so don't assume one.
+  - Fallback if no usable package exists: build the Pi kernel with
+    `bcm2712_rt_defconfig` (RT is in the source tree since 6.12, so no patches are
+    needed), with the build notes in `os/kernel/`.
+- Cmdline `isolcpus=3 nohz_full=3 rcu_nocbs=3` (`os/cmdline.txt`). Core 3 belongs to the
+  audio thread only.
+- `os/config.txt` enables the I2S overlay built from `dts/` (`dtoverlay=…`).
 - Pin the RP1/I2S DMA IRQ to core 3 (or its threaded IRQ at a priority above audiod).
-  Move every other IRQ to cores 0-1.
-- Set the CPU governor to `performance` so frequency-scaling transitions can't add latency.
+  Move every other IRQ to cores 0-1 and disable `irqbalance`. Set the CPU governor to
+  `performance` so frequency-scaling transitions can't add latency. Both are done by
+  `os/rt-tune.sh`, a shell script (Python is not allowed outside `tools/`/`ui/`). It runs
+  from the `systemd/rt-tune.service` oneshot, which is ordered before audiod. The Pi's
+  active cooler (Components.md) keeps full clock from thermal throttling during the 48 h soak.
 - systemd is the **supervisor**. Each daemon is `Type=notify` with `WatchdogSec=` and
   `Restart=on-failure`, which covers the CLAUDE.md requirement of a heartbeat within 60 s
-  and clean exit codes. Open every fd with `O_CLOEXEC` so restarts don't leave orphaned fds.
-- No outbound networking (graded boundary). The firewall allows only inbound LAN to the UI port.
+  and clean exit codes. Scheduling setup goes in the unit files (`CPUAffinity=`,
+  `CPUSchedulingPolicy=fifo`, `CPUSchedulingPriority=`, `LimitMEMLOCK=infinity`), not in
+  code. Open every fd with `O_CLOEXEC` so restarts don't leave orphaned fds.
+- **audiod's watchdog ping comes from a non-RT thread**, because `sd_notify` is a syscall
+  and the RT loop makes none. That thread sends `WATCHDOG=1` only if the status-block
+  heartbeat counter has advanced since its last check, so a stuck RT loop still trips the
+  watchdog.
+- No outbound networking (graded boundary, CLAUDE.md). `os/nftables.conf` accepts inbound
+  traffic only from the LAN subnet, and only to two ports: the UI port and SSH. SSH is
+  there for `make deploy` and is key-only (`PasswordAuthentication no`, set in
+  `os/sshd_config.d/`). Replies on those connections are allowed. Everything else, inbound
+  or outbound, is dropped: no NTP, mDNS or DNS, and the Pi never starts a connection. Logs
+  use monotonic timestamps, and the Pi is addressed by its LAN IP.
 
 ## 3. Processes (the "multi-process" mechanism)
 
@@ -101,7 +133,7 @@ Mic  ─► THAT1512 (preamp) ──┘                                         
 
 ## 6. Proposed repo layout
 ```
-Makefile           # make / test / asan / memcheck / soakcheck / deploy
+Makefile           # make / test / asan / memcheck / soakcheck / deploy (installs os/, systemd/, dts/)
 src/common/        # shm ring, seqlock, logging, sd_notify wrapper
 src/audio/         # audiod
 src/ctl/           # ctld
@@ -109,7 +141,8 @@ analysis/          # analyzerd: delay est., transfer fn, EQ solver (graded)
 ui/                # Python LAN UI (non-graded)
 tools/             # Python capture/plot helpers (non-graded)
 dts/               # device-tree overlay for the I2S card
-systemd/           # unit files
+os/                # cmdline.txt, config.txt fragments, nftables.conf, sshd_config.d/, rt-tune.sh, kernel/ (fallback build notes only)
+systemd/           # unit files, incl. rt-tune.service oneshot
 tests/             # unit tests (biquads, ring, delay estimator) on recorded/synthetic WAVs
 ```
 
@@ -139,5 +172,11 @@ tests/             # unit tests (biquads, ring, delay estimator) on recorded/syn
   round-trip latency with an impulse.
 - `cyclictest -a 3 -p 90` under `stress-ng` load on cores 0-2 confirms the RT
   isolation before audio work begins.
+- After `make deploy`, `/sys/kernel/realtime` reads 1, `apt-mark showhold` lists the RT
+  kernel, and `/proc/cmdline`, `/proc/interrupts` (I2S IRQ count rising only on CPU3),
+  `scaling_governor` and `nft list ruleset` match the files in `os/`. From the LAN,
+  the UI port and key-based SSH answer, password SSH is rejected, and every other port is
+  refused or times out. From off the LAN subnet, SSH is refused too. An
+  outbound probe from the Pi (e.g. `curl` to an external host) fails.
 - `make test`, `make asan` and `make memcheck` pass. `make soakcheck` reports 0 xruns
   and a watchdog heartbeat for every daemon.
