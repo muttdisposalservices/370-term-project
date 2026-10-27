@@ -12,3 +12,6 @@
 - Proposed structure updates now include data regarding expected latency with respect to sample rate and frame periods. Additionally, RBP OS stuff was included in the proposed repo to prevent updating RBP stuff on the Pi itself.
 - Included tests specifically to ensure real-time kernel usage, plus proper watchdog monitoring.
 - Updated repo.
+
+## 10/26 [Hazel]
+- Pointed Claude to proposed structure and asked for help making an architecture diagram. Clarified specific rates, buffer quantities, and EQ specifications.

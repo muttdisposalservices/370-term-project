@@ -1,0 +1,404 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1380" viewBox="0 0 1700 1380">
+  <defs>
+    <style>
+      text { font-family: "Segoe UI", Helvetica, Arial, sans-serif; fill: #1b1f24; font-size: 11.5px; }
+      .h1 { font-size: 22px; font-weight: 700; }
+      .sub { font-size: 12.5px; fill: #4a5260; }
+      .t { font-size: 17px; font-weight: 700; text-anchor: middle; }
+      .s { font-size: 12px; fill: #3a4250; text-anchor: middle; }
+      .b { font-weight: 700; font-size: 12.5px; }
+      .it { font-style: italic; fill: #59616e; }
+      .our { font-style: italic; fill: #2c4f7c; text-anchor: middle; font-size: 12px; }
+      .lbl { font-size: 11px; fill: #2a2f36; }
+      .lc { font-size: 11px; fill: #2a2f36; text-anchor: middle; }
+      .lr { font-size: 11px; fill: #2a2f36; text-anchor: end; }
+      .agr { fill: #0e7c6b; font-weight: 600; }
+      .red { fill: #a8322d; font-style: italic; font-size: 12px; }
+      .k { fill: #f2f3f5; text-anchor: middle; font-size: 11.5px; }
+      .kb { fill: #ffffff; text-anchor: middle; font-size: 12.5px; font-weight: 700; }
+      .kh { fill: #d9dce1; font-size: 12.5px; }
+      .hc { text-anchor: middle; }
+      .hb { text-anchor: middle; font-weight: 700; font-size: 13px; }
+      .note { fill: #6b6f76; font-size: 11.5px; }
+      .th { font-weight: 700; font-size: 12px; }
+      .td { font-size: 12px; }
+      .proc { fill: #eaf1fb; stroke: #3b5b85; stroke-width: 1.5; }
+      .slot { fill: #ffffff; stroke: #3b5b85; stroke-width: 0.8; }
+      .hw { fill: #ededed; stroke: #9a9a9a; stroke-width: 1.3; }
+      .sup { fill: #fbe9ea; stroke: #b03a3a; stroke-width: 1.5; }
+      .kcell { fill: #3b3f46; }
+      .hot { stroke: #1f3a5f; stroke-width: 3; fill: none; }
+      .dat { stroke: #3e6fb0; stroke-width: 1.8; fill: none; }
+      .ctl { stroke: #6a6f78; stroke-width: 1.5; stroke-dasharray: 6 4; fill: none; }
+      .sv { stroke: #a8322d; stroke-width: 1.6; stroke-dasharray: 7 5; fill: none; }
+    </style>
+    <marker id="mh" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f3a5f"/></marker>
+    <marker id="md" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3e6fb0"/></marker>
+    <marker id="mc" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6a6f78"/></marker>
+    <marker id="ms" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a8322d"/></marker>
+  </defs>
+
+  <rect width="1700" height="1380" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="30" y="40" class="h1">DSP unit: runtime architecture</text>
+  <text x="30" y="64" class="sub">Raspberry Pi 5 · PREEMPT_RT · fs = 96 kHz, 64-frame periods (0.667 ms) · output latency depends only on audiod: 2 × 64 frames ≈ 1.3 ms + converter group delay · analysis is a slow closed loop (seconds) and never delays audio</text>
+
+  <!-- Supervision bus (systemd → audiod over the top) -->
+  <path class="sv" d="M1545,120 V100 H230 V118" marker-end="url(#ms)"/>
+  <text x="900" y="93" class="red" text-anchor="middle">restart on hang or crash · every daemon sends WATCHDOG=1 back to systemd <tspan class="agr" font-style="normal">every 5 s</tspan></text>
+
+  <!-- ================= USER SPACE ================= -->
+
+  <!-- audiod -->
+  <rect x="30" y="120" width="400" height="290" rx="6" class="proc"/>
+  <text x="230" y="146" class="t">audiod</text>
+  <text x="230" y="165" class="s">C17 · src/audio/ · SCHED_FIFO 80 (C) · mlockall</text>
+  <rect x="45" y="178" width="370" height="120" rx="4" class="slot"/>
+  <text x="57" y="197" class="b">RT thread · core 3 (isolated)</text>
+  <text x="57" y="216">per 64-frame period · 0.667 ms · 1500/s:</text>
+  <text x="57" y="233">read L/R → 19 biquads (EQ) → comp/gate → limiter</text>
+  <text x="57" y="250">→ DAC (same mono signal on L and R)</text>
+  <text x="57" y="267">→ push raw L/R to ring · update status block</text>
+  <text x="57" y="287" class="it">no malloc · no blocking syscalls · no logging</text>
+  <rect x="45" y="308" width="370" height="92" rx="4" class="slot"/>
+  <text x="57" y="327" class="b">non-RT thread · cores 0-1</text>
+  <text x="57" y="345">WATCHDOG=1 <tspan class="agr">every 5 s</tspan>, only if the heartbeat advanced</text>
+  <text x="57" y="362">drains xrun/events to journald (monotonic time)</text>
+  <text x="57" y="379">drives XSMT mute/unmute via GPIO</text>
+
+  <!-- shared memory (D) -->
+  <rect x="550" y="120" width="320" height="290" rx="6" class="proc"/>
+  <text x="710" y="146" class="t">shared memory (D)</text>
+  <text x="710" y="164" class="s">/dev/shm · mapped once · survives restarts</text>
+  <rect x="562" y="174" width="296" height="54" rx="4" class="slot"/>
+  <text x="572" y="192" class="b">SPSC no-drop ring (F)</text>
+  <text x="572" y="208" class="agr">2¹⁷ frames × 2 ch float32 = 1 MiB (≈ 1.37 s)</text>
+  <text x="572" y="223">writer never waits · generation counter</text>
+  <rect x="562" y="236" width="296" height="50" rx="4" class="slot"/>
+  <text x="572" y="255"><tspan class="b">coeff triple buffer</tspan> · analyzerd → audiod</text>
+  <text x="572" y="273" class="agr">19 × ⅓-oct biquads, float64 · 760 B</text>
+  <rect x="562" y="296" width="296" height="50" rx="4" class="slot"/>
+  <text x="572" y="315"><tspan class="b">param triple buffer</tspan> · ctld → audiod</text>
+  <text x="572" y="333">bypass · limits · presets · dynamics</text>
+  <rect x="562" y="352" width="296" height="50" rx="4" class="slot"/>
+  <text x="572" y="371"><tspan class="b">meter/status block</tspan> · audiod → ctld</text>
+  <text x="572" y="389">peaks · gain reduction · xruns · heartbeat</text>
+
+  <!-- audiod ↔ shm -->
+  <path class="dat" d="M432,201 H560" marker-end="url(#md)"/>
+  <text x="494" y="195" class="lc">1500/s × 512 B</text>
+  <text x="494" y="215" class="lc">= 768 KB/s</text>
+  <path class="dat" d="M560,261 H432" marker-end="url(#md)"/>
+  <text x="494" y="255" class="lc">load idx 1×/period</text>
+  <text x="494" y="275" class="lc">ramp over 1 period</text>
+  <path class="dat" d="M560,321 H432" marker-end="url(#md)"/>
+  <text x="494" y="315" class="lc">load idx 1×/period</text>
+  <text x="494" y="335" class="lc">wait-free</text>
+  <path class="dat" d="M432,377 H560" marker-end="url(#md)"/>
+  <text x="494" y="371" class="lc">write 1500/s</text>
+  <text x="494" y="391" class="lc">(every period)</text>
+
+  <!-- analyzerd -->
+  <rect x="1000" y="120" width="310" height="170" rx="6" class="proc"/>
+  <text x="1155" y="146" class="t">analyzerd</text>
+  <text x="1155" y="165" class="s">C17 · analysis/ · core 2 · SCHED_OTHER</text>
+  <text x="1155" y="184" class="our">our graded intelligence: no models, no cloud</text>
+  <text x="1014" y="204">GCC-PHAT delay, Source vs mic (10–100 ms)</text>
+  <text x="1014" y="221">H(f) = System / Source, ⅓-oct smoothed</text>
+  <text x="1014" y="238" class="agr">FFT 32768 / hop 8192 · 2.9 Hz bins</text>
+  <text x="1014" y="255">inverse mic curve · trusts 100 Hz–8 kHz</text>
+  <text x="1014" y="272">gates: level · coherence · Δ · cuts over boosts</text>
+
+  <!-- ctld -->
+  <rect x="1000" y="302" width="310" height="108" rx="6" class="proc"/>
+  <text x="1155" y="327" class="t">ctld</text>
+  <text x="1155" y="345" class="s">C17 · src/ctl/ · cores 0-1 · SCHED_OTHER</text>
+  <text x="1014" y="364">control plane: presets · limits · bypass · meters</text>
+  <text x="1014" y="381">sole producer of the param triple buffer</text>
+  <text x="1014" y="398">bypass/limits work even if analyzerd is down</text>
+
+  <!-- shm ↔ analyzerd / ctld -->
+  <path class="dat" d="M858,201 H998" marker-end="url(#md)"/>
+  <text x="929" y="195" class="lc agr">hop 8192 ≈ 11.7/s</text>
+  <text x="929" y="215" class="lc">drops + counts if late</text>
+  <path class="dat" d="M998,261 H860" marker-end="url(#md)"/>
+  <text x="929" y="255" class="lc">≤ 1–2/s · <tspan class="agr">760 B</tspan></text>
+  <text x="929" y="275" class="lc">gated publish</text>
+  <path class="dat" d="M998,321 H860" marker-end="url(#md)"/>
+  <text x="929" y="315" class="lc agr">≤ 50/s, on change</text>
+  <text x="929" y="335" class="lc">event-driven</text>
+  <path class="dat" d="M858,377 H998" marker-end="url(#md)"/>
+  <text x="929" y="371" class="lc agr">sampled at 20 Hz</text>
+  <text x="929" y="391" class="lc">read-only</text>
+
+  <!-- systemd (E) -->
+  <rect x="1420" y="120" width="250" height="170" rx="6" class="sup"/>
+  <text x="1545" y="146" class="t">systemd</text>
+  <text x="1545" y="165" class="s">supervisor / watchdog (E)</text>
+  <text x="1434" y="187">Type=notify · WatchdogSec=<tspan class="agr">10</tspan></text>
+  <text x="1434" y="204">pings every <tspan class="agr">5 s</tspan> · READY &lt; 60 s</text>
+  <text x="1434" y="221">Restart=on-failure · short RestartSec</text>
+  <text x="1434" y="238">StartLimitBurst stops restart storms</text>
+  <text x="1434" y="255">rt-tune.service runs before audiod</text>
+  <text x="1434" y="272">unit files set affinity + FIFO prio</text>
+
+  <!-- ui -->
+  <rect x="1420" y="318" width="250" height="92" rx="6" class="proc"/>
+  <text x="1545" y="342" class="t">ui</text>
+  <text x="1545" y="360" class="s">Python · ui/ · cores 0-1</text>
+  <text x="1545" y="377" class="hc">LAN web interface; talks only to ctld</text>
+  <text x="1545" y="394" class="hc it">no graded mechanism here</text>
+
+  <!-- ctld ↔ ui -->
+  <path class="dat" d="M1312,380 H1418" marker-start="url(#md)" marker-end="url(#md)"/>
+  <text x="1365" y="373" class="lc">AF_UNIX · <tspan class="agr">20 Hz</tspan></text>
+  <text x="1365" y="396" class="lc">meters ↔ ctl req</text>
+
+  <!-- systemd restart arrows -->
+  <path class="sv" d="M1420,205 H1312" marker-end="url(#ms)"/>
+  <path class="sv" d="M1545,290 V316" marker-end="url(#ms)"/>
+  <path class="sv" d="M1420,270 H1365 V340 H1312" marker-end="url(#ms)"/>
+
+  <!-- ================= BOUNDARY ================= -->
+  <line x1="30" y1="430" x2="1670" y2="430" stroke="#8a8f96" stroke-width="1.2" stroke-dasharray="8 6"/>
+  <text x="1155" y="424" class="lc it">kernel/user boundary</text>
+
+  <!-- user ↔ kernel arrows -->
+  <path class="hot" d="M70,414 V476" marker-start="url(#mh)" marker-end="url(#mh)"/>
+  <text x="80" y="447" class="lbl">mmap R/W</text>
+  <text x="80" y="463" class="lbl">768 KB/s each way</text>
+  <path class="ctl" d="M330,478 V414" marker-end="url(#mc)"/>
+  <text x="322" y="447" class="lr">wake ~3000/s</text>
+  <text x="322" y="463" class="lr">1500 / stream</text>
+  <path class="ctl" d="M410,412 V466 H824 V478" marker-end="url(#mc)"/>
+  <text x="617" y="460" class="lc">XSMT mute/unmute · on events</text>
+  <path class="dat" d="M1545,414 V476" marker-start="url(#md)" marker-end="url(#md)"/>
+  <text x="1555" y="447" class="lbl">WebSocket</text>
+  <text x="1555" y="463" class="lbl agr">20 Hz push</text>
+
+  <!-- ================= KERNEL ================= -->
+  <rect x="30" y="480" width="1640" height="112" rx="6" fill="#2b2d31"/>
+  <text x="44" y="501" class="kh"><tspan font-weight="700" fill="#ffffff">kernel space</tspan> · PREEMPT_RT 6.12+ · isolcpus=3 nohz_full=3 rcu_nocbs=3 · other IRQs on cores 0-1 · irqbalance off · governor = performance</text>
+
+  <rect x="40" y="512" width="160" height="70" rx="4" class="kcell"/>
+  <text x="120" y="534" class="kb">ALSA ASoC</text>
+  <text x="120" y="551" class="k">simple-audio-card</text>
+  <text x="120" y="568" class="k">hw: mmap · 2 × 64 frames</text>
+
+  <rect x="208" y="512" width="152" height="70" rx="4" class="kcell"/>
+  <text x="284" y="534" class="kb">threaded IRQ (B)</text>
+  <text x="284" y="551" class="k">RP1 I2S/DMA → core 3</text>
+  <text x="284" y="568" class="k">prio above audiod</text>
+
+  <rect x="368" y="512" width="392" height="70" rx="4" class="kcell"/>
+  <text x="564" y="534" class="kb">RP1 I2S + DMA (over PCIe)</text>
+  <text x="564" y="551" class="k">clock consumer: BCK/LRCK from PCM1808</text>
+  <text x="564" y="568" class="k">device-tree overlay from dts/</text>
+
+  <rect x="768" y="512" width="112" height="70" rx="4" class="kcell"/>
+  <text x="824" y="534" class="kb">gpiochip</text>
+  <text x="824" y="551" class="k">XSMT GPIO</text>
+
+  <rect x="888" y="512" width="142" height="70" rx="4" class="kcell"/>
+  <text x="959" y="534" class="kb">tmpfs /dev/shm</text>
+  <text x="959" y="551" class="k">memfd / shm_open</text>
+  <text x="959" y="568" class="k">4 segments</text>
+
+  <rect x="1038" y="512" width="212" height="70" rx="4" class="kcell"/>
+  <text x="1144" y="534" class="kb">AF_UNIX socket</text>
+  <text x="1144" y="551" class="k">ctld ↔ ui only</text>
+
+  <rect x="1258" y="512" width="402" height="70" rx="4" class="kcell"/>
+  <text x="1459" y="534" class="kb">TCP/IP + nftables</text>
+  <text x="1459" y="551" class="k">in: LAN subnet → UI port + key-only SSH</text>
+  <text x="1459" y="568" class="k">out: everything dropped (no DNS / NTP / mDNS)</text>
+
+  <!-- kernel ↔ hardware arrows -->
+  <path class="hot" d="M470,648 V596" marker-end="url(#mh)"/>
+  <text x="462" y="614" class="lr">I2S DIN · 6.144 Mbit/s</text>
+  <text x="462" y="630" class="lr">L = Source, R = System</text>
+  <path class="hot" d="M740,594 V646" marker-end="url(#mh)"/>
+  <text x="732" y="614" class="lr">I2S DOUT · 6.144 Mbit/s</text>
+  <text x="732" y="630" class="lr">mono on L + R</text>
+  <path class="ctl" d="M824,594 V646" marker-end="url(#mc)"/>
+  <text x="832" y="614" class="lbl">XSMT pin</text>
+  <text x="832" y="630" class="lbl">on events</text>
+  <path class="dat" d="M1545,596 V646" marker-start="url(#md)" marker-end="url(#md)"/>
+  <text x="1555" y="614" class="lbl">LAN only</text>
+  <text x="1555" y="630" class="lbl">a few KB/s</text>
+
+  <!-- ================= HARDWARE ================= -->
+  <rect x="30" y="650" width="200" height="50" rx="6" class="hw"/>
+  <text x="130" y="671" class="hb">THAT1246 line receiver</text>
+  <text x="130" y="689" class="hc">Source ← mixing desk</text>
+  <rect x="30" y="720" width="200" height="50" rx="6" class="hw"/>
+  <text x="130" y="741" class="hb">THAT1512 mic preamp</text>
+  <text x="130" y="759" class="hc">System ← dynamic mic, ~55 dB</text>
+  <path class="hot" d="M232,675 H298" marker-end="url(#mh)"/>
+  <text x="265" y="668" class="lc">analog</text>
+  <path class="hot" d="M232,745 H298" marker-end="url(#mh)"/>
+  <text x="265" y="738" class="lc">analog</text>
+
+  <rect x="300" y="650" width="200" height="120" rx="6" class="hw"/>
+  <text x="400" y="672" class="hb">PCM1808 ADC</text>
+  <text x="400" y="690" class="hc">I2S master (one clock domain)</text>
+  <text x="400" y="707" class="hc">L = Source, R = System</text>
+  <text x="400" y="724" class="hc">24-bit in 32-bit slots</text>
+  <text x="400" y="741" class="hc">BCK 6.144 MHz = 64 fs</text>
+  <text x="400" y="758" class="hc">LRCK 96 kHz</text>
+
+  <path class="ctl" d="M502,700 H718" marker-end="url(#mc)"/>
+  <text x="610" y="693" class="lc">BCK 6.144 MHz · LRCK 96 kHz</text>
+  <text x="610" y="715" class="lc">→ DAC and RP1</text>
+
+  <rect x="720" y="650" width="200" height="120" rx="6" class="hw"/>
+  <text x="820" y="672" class="hb">PCM5102A DAC</text>
+  <text x="820" y="690" class="hc">I2S slave</text>
+  <text x="820" y="707" class="hc">same mono signal on L and R</text>
+  <text x="820" y="724" class="hc">XSMT: muted until the first</text>
+  <text x="820" y="741" class="hc">good period after (re)start</text>
+
+  <path class="hot" d="M922,710 H978" marker-end="url(#mh)"/>
+  <text x="950" y="703" class="lc">analog</text>
+
+  <rect x="980" y="650" width="180" height="120" rx="6" class="hw"/>
+  <text x="1070" y="672" class="hb">DRV134 × 2</text>
+  <text x="1070" y="690" class="hc">balanced line drivers</text>
+  <text x="1070" y="707" class="hc">→ PA / speakers</text>
+  <text x="1070" y="728" class="hc it">the actuator: hot path,</text>
+  <text x="1070" y="745" class="hc it">not optional</text>
+
+  <rect x="530" y="795" width="160" height="44" rx="6" class="hw"/>
+  <text x="610" y="814" class="hb">24.576 MHz osc</text>
+  <text x="610" y="831" class="hc">256 × 96 kHz</text>
+  <path class="ctl" d="M530,817 H400 V772" marker-end="url(#mc)"/>
+  <text x="465" y="811" class="lc">SCKI 24.576 MHz</text>
+  <path class="ctl" d="M690,817 H820 V772" marker-end="url(#mc)"/>
+  <text x="755" y="811" class="lc">SCK 24.576 MHz</text>
+
+  <rect x="1190" y="650" width="200" height="120" rx="6" fill="none" stroke="#b5b5b5" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="1202" y="672" class="note">Letters mark the Section 3.2</text>
+  <text x="1202" y="689" class="note">mechanisms we use:</text>
+  <text x="1202" y="706" class="note">B, C, D, E, F.</text>
+  <text x="1202" y="730" class="note">No (A): we use stock ALSA/RP1</text>
+  <text x="1202" y="747" class="note">drivers + our DT overlay.</text>
+
+  <rect x="1420" y="650" width="250" height="120" rx="6" class="hw"/>
+  <text x="1545" y="672" class="hb">LAN client</text>
+  <text x="1545" y="692" class="hc">browser: meters + controls</text>
+  <text x="1545" y="710" class="hc">dev box: make deploy over SSH</text>
+  <text x="1545" y="736" class="hc it">the Pi never opens</text>
+  <text x="1545" y="753" class="hc it">a connection</text>
+
+  <!-- ================= LEGEND ================= -->
+  <path class="hot" d="M30,872 H80" marker-end="url(#mh)"/>
+  <text x="90" y="876">audio samples (hot path)</text>
+  <path class="dat" d="M290,872 H340" marker-end="url(#md)"/>
+  <text x="350" y="876">shared memory / socket data</text>
+  <path class="ctl" d="M580,872 H630" marker-end="url(#mc)"/>
+  <text x="640" y="876">control, clocks, events</text>
+  <path class="sv" d="M840,872 H890" marker-end="url(#ms)"/>
+  <text x="900" y="876">supervision (restart / watchdog)</text>
+  <text x="1160" y="876"><tspan class="agr">teal</tspan> = value agreed in the rate review (not yet in ProposedStructure.md)</text>
+
+  <!-- ================= RATE TABLE ================= -->
+  <text x="30" y="910" class="b" font-size="14">Rates on every arrow (fs = 96 kHz)</text>
+  <rect x="30" y="918" width="1640" height="24" fill="#eef1f5"/>
+  <text x="40" y="935" class="th">Flow</text>
+  <text x="640" y="935" class="th">Rate</text>
+  <text x="1260" y="935" class="th">Basis</text>
+
+  <rect x="30" y="964" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1006" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1048" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1090" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1132" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1174" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1216" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1258" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1300" width="1640" height="21" fill="#f7f8fa"/>
+  <rect x="30" y="1342" width="1640" height="21" fill="#f7f8fa"/>
+
+  <g class="td">
+    <text x="40" y="958" class="td">24.576 MHz osc → PCM1808 SCKI, PCM5102A SCK</text>
+    <text x="640" y="958" class="td">24.576 MHz (256 fs)</text>
+    <text x="1260" y="958" class="td">ProposedStructure §1</text>
+
+    <text x="40" y="979" class="td">PCM1808 (I2S master) → BCK / LRCK to RP1 and PCM5102A</text>
+    <text x="640" y="979" class="td">BCK 6.144 MHz (64 fs) · LRCK 96 kHz</text>
+    <text x="1260" y="979" class="td">hardware</text>
+
+    <text x="40" y="1000" class="td">PCM1808 → RP1 I2S DIN (L = Source, R = System)</text>
+    <text x="640" y="1000" class="td">6.144 Mbit/s · 32-bit slots, 24 valid bits</text>
+    <text x="1260" y="1000" class="td">hardware</text>
+
+    <text x="40" y="1021" class="td">RP1 I2S DOUT → PCM5102A (mono on L + R)</text>
+    <text x="640" y="1021" class="td">6.144 Mbit/s</text>
+    <text x="1260" y="1021" class="td">hardware, §7.4</text>
+
+    <text x="40" y="1042" class="td">RP1 DMA ↔ ALSA mmap buffer ↔ audiod</text>
+    <text x="640" y="1042" class="td">768 KB/s each way · 128-frame buffer (2 × 64)</text>
+    <text x="1260" y="1042" class="td">§4</text>
+
+    <text x="40" y="1063" class="td">DMA-completion IRQ → threaded IRQ (core 3) → wakes audiod</text>
+    <text x="640" y="1063" class="td">~1500/s per stream, ~3000/s total</text>
+    <text x="1260" y="1063" class="td">derived; verify in /proc/interrupts</text>
+
+    <text x="40" y="1084" class="td">audiod RT loop</text>
+    <text x="640" y="1084" class="td">64 frames = 0.667 ms · 1500 periods/s</text>
+    <text x="1260" y="1084" class="td">§4</text>
+
+    <text x="40" y="1105" class="td">audiod → SPSC ring (float32, 2¹⁷ frames = 1 MiB ≈ 1.37 s)</text>
+    <text x="640" y="1105" class="td">1500 pushes/s × 512 B = 768 KB/s</text>
+    <text x="1260" y="1105" class="td agr">agreed (format, capacity)</text>
+
+    <text x="40" y="1126" class="td">ring → analyzerd (FFT 32768, hop 8192)</text>
+    <text x="640" y="1126" class="td">≈ 11.7 analyses/s · reader drops + counts on overrun</text>
+    <text x="1260" y="1126" class="td agr">agreed</text>
+
+    <text x="40" y="1147" class="td">analyzerd → coeff triple buffer (19 × ⅓-oct biquads, float64)</text>
+    <text x="640" y="1147" class="td">≤ 1–2 publishes/s · 760 B each (≤ 1.5 KB/s), gated</text>
+    <text x="1260" y="1147" class="td">§3 + <tspan class="agr">agreed (biquad count, precision)</tspan></text>
+
+    <text x="40" y="1168" class="td">ctld → param triple buffer (bypass, limits, presets, dynamics)</text>
+    <text x="640" y="1168" class="td">event-driven, capped at 50/s</text>
+    <text x="1260" y="1168" class="td agr">agreed (fixes the two-writer gap in §3)</text>
+
+    <text x="40" y="1189" class="td">audiod loads both triple-buffer indices; ramps over 1 period</text>
+    <text x="640" y="1189" class="td">1500/s</text>
+    <text x="1260" y="1189" class="td">§3</text>
+
+    <text x="40" y="1210" class="td">audiod → meter/status block (peaks, GR, xruns, heartbeat)</text>
+    <text x="640" y="1210" class="td">1500 writes/s</text>
+    <text x="1260" y="1210" class="td">§3</text>
+
+    <text x="40" y="1231" class="td">status block → ctld → AF_UNIX socket → ui</text>
+    <text x="640" y="1231" class="td">20 Hz</text>
+    <text x="1260" y="1231" class="td agr">agreed (ui never maps shm)</text>
+
+    <text x="40" y="1252" class="td">ui ↔ LAN browser</text>
+    <text x="640" y="1252" class="td">WebSocket push 20 Hz, a few KB/s · control requests at human rate</text>
+    <text x="1260" y="1252" class="td agr">agreed</text>
+
+    <text x="40" y="1273" class="td">every daemon → systemd WATCHDOG=1</text>
+    <text x="640" y="1273" class="td">every 5 s (WatchdogSec=10); audiod only if its heartbeat advanced</text>
+    <text x="1260" y="1273" class="td agr">agreed</text>
+
+    <text x="40" y="1294" class="td">systemd → daemon restart</text>
+    <text x="640" y="1294" class="td">on crash, nonzero exit or missed watchdog; StartLimitBurst caps storms</text>
+    <text x="1260" y="1294" class="td">§5</text>
+
+    <text x="40" y="1315" class="td">audiod non-RT thread → journald</text>
+    <text x="640" y="1315" class="td">event-driven (xruns etc.), target 0 during the 48 h soak</text>
+    <text x="1260" y="1315" class="td">§5</text>
+
+    <text x="40" y="1336" class="td">audiod non-RT thread → gpiochip → PCM5102A XSMT</text>
+    <text x="640" y="1336" class="td">on events: mute at teardown, unmute after the first good period</text>
+    <text x="1260" y="1336" class="td">§5</text>
+
+    <text x="40" y="1357" class="td">LAN ↔ nftables ↔ sshd / UI port</text>
+    <text x="640" y="1357" class="td">inbound from LAN subnet only · all egress dropped · SSH only for make deploy</text>
+    <text x="1260" y="1357" class="td">§2</text>
+  </g>
+</svg>
