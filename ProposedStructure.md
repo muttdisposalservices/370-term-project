@@ -7,26 +7,28 @@ the Source-vs-System correcting processor, using the listed parts. This is a des
 Nothing gets implemented until you approve it (CLAUDE.md: multi-file work is planned first).
 
 ## 1. Signal path and clock domain (hardware → kernel)
+*(Revised: the custom ADC/DAC board below was folded into a single off-the-shelf USB
+interface, now decided as the Behringer UMC202HD -- see Components.md, Schematic.svg and
+rework.md for how that decision was reached.)*
 ```
-Desk ─► THAT1246 (line rx) ─┐
-                            ├─► PCM1808 ADC (L=Source, R=System) ─I2S─► Pi 5 (RP1 I2S, GPIO18-21)
-Mic  ─► THAT1512 (preamp) ──┘                                               │
-                                                                            ▼
-               DRV134 ×2 ◄── PCM5102A DAC ◄──────────────I2S DOUT───────── audiod
-   24.576 MHz osc ─► SCKI of PCM1808 and SCK of PCM5102A
+Desk ─► UMC202HD input 1 (combo XLR/TRS, line) ──┐
+                                                  ├─► internal ADC (L=Source, R=System) ─USB─► Pi 5 (xHCI host)
+Mic  ─► UMC202HD input 2 (combo XLR/TRS, MIDAS preamp) ┘                                         │
+                                                                                                  ▼
+          TRS→XLR adapter cables ◄── UMC202HD internal DAC ◄──USB isochronous OUT── audiod
 ```
-- **One stereo ADC for both sensors.** Source and System are sampled on the same clock edge,
-  so the two channels can never drift apart. This is what makes the sensors *fuse*: any
-  delay between them is acoustic, not caused by the converters.
-- **Clock topology:** 24.576 MHz = 256 × 96 kHz. **Decided: fs = 96 kHz** (48 kHz is not
-  used). Make the PCM1808 the
-  I2S **master** (it generates BCK/LRCK from SCKI). The Pi (RP1, clock-consumer mode) and the
-  PCM5102A are slaves on the same BCK/LRCK. The result is one full-duplex I2S link with a
-  single clock domain, so the ADC and DAC rates can't drift relative to each other.
-- **Link rates:** BCK = 64 fs = 6.144 MHz, LRCK = 96 kHz, 32-bit slots carrying 24 valid
-  bits. Each direction runs at 2 ch × 32 b × 96 kHz = 6.144 Mbit/s (768 KB/s).
-- **Kernel side:** a device-tree overlay with `simple-audio-card` (Pi as bitclock/frame
-  slave) exposes one ALSA card with 2 capture channels and 2 playback channels.
+- **One stereo ADC for both sensors, now inside the UMC202HD.** Source and System are sampled
+  on the same clock edge inside the interface, so the two channels can never drift apart.
+  This is what makes the sensors *fuse*: any delay between them is acoustic, not caused by
+  the converters.
+- **Clock topology:** the UMC202HD's internal ADC/DAC share one clock, entirely internal to
+  the interface and not Pi-configurable. The Pi only sees the negotiated result over USB
+  Audio Class 2.0 (isochronous IN/OUT), handled by `snd-usb-audio`, not by a kernel clock we
+  own. Sample rate is negotiated up to the interface's 192 kHz ceiling; target 96 kHz
+  (VERIFY against the device).
+- **Kernel side:** no device-tree overlay, no I2S, no vendor driver. `snd-usb-audio` (stock
+  driver) enumerates the UMC202HD as one ALSA card with 2 capture channels and 2 playback
+  channels over USB.
 
 ## 2. Base OS configuration
 Everything in this section is versioned under `os/` and `systemd/` and installed by
@@ -48,8 +50,9 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     needed), with the build notes in `os/kernel/`.
 - Cmdline `isolcpus=3 nohz_full=3 rcu_nocbs=3` (`os/cmdline.txt`). Core 3 belongs to the
   audio thread only.
-- `os/config.txt` enables the I2S overlay built from `dts/` (`dtoverlay=…`).
-- Pin the RP1/I2S DMA IRQ to core 3 (or its threaded IRQ at a priority above audiod).
+- Pin the USB xHCI completion IRQ for the UMC202HD's isochronous endpoints to core 3
+  (or its threaded IRQ at a priority above audiod). No device-tree overlay is needed --
+  the interface enumerates under stock `snd-usb-audio`.
   Move every other IRQ to cores 0-1 and disable `irqbalance`. Set the CPU governor to
   `performance` so frequency-scaling transitions can't add latency. Both are done by
   `os/rt-tune.sh`, a shell script (Python is not allowed outside `tools/`/`ui/`). It runs
@@ -141,9 +144,11 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 ## 5. Failure behaviour (soak-test relevant)
 - **analyzerd dies:** audiod keeps running on the last-good coefficients and systemd
   restarts the analyzer. Audio is unaffected.
-- **audiod dies:** drive the PCM5102A **XSMT (soft-mute) pin** from a GPIO so the output
-  mutes before teardown and stays muted until audiod's first good period. This protects
-  drivers from pops and DC.
+- **audiod dies:** no GPIO mute pin exists on the UMC202HD, so audiod mutes by writing
+  silence to the ALSA playback buffer before teardown, and stays muted until its first
+  good period after restart. This protects drivers from pops and DC without a hardware
+  mute line. **Known gap:** this only covers a clean exit path -- if audiod hangs rather
+  than exiting, nothing writes silence until systemd's watchdog kills and restarts it.
 - **xrun:** detect it via `snd_pcm_status`, count it in the status block, recover with
   `snd_pcm_prepare`, and log from a non-RT thread. The 48 h soak should show zero xruns.
 - The limiter is in audiod, at sample accuracy, after EQ. Protection never depends on the
@@ -177,26 +182,23 @@ systemd/           # unit files, incl. rt-tune.service oneshot
 tests/             # unit tests (biquads, ring, delay estimator) on recorded/synthetic WAVs
 ```
 
-## 7. Hardware decisions (resolved 2026-10-16) and follow-ups
+## 7. Hardware decisions (resolved 2026-10-16, revised for the UMC202HD) and follow-ups
 1. **Dynamic mic, no phantom power.** A dynamic mic is not flat. Most have a presence peak
-   and a low-frequency rolloff, and their output is low, so the THAT1512 needs roughly
-   50–60 dB of gain. analyzerd needs three things to cope:
+   and a low-frequency rolloff, and their output is low, so the UMC202HD's input 2 MIDAS
+   preamp is run at roughly 50–60 dB of gain. analyzerd needs three things to cope:
    - an inverse mic-response curve, a small table taken from the mic's published response
    - a limited band where corrections are trusted, roughly 100 Hz–8 kHz
    - a coherence gate, so the preamp noise floor is never "corrected".
-2. **Pi 5 V rail → THAT1512 and PCM1808 analog VCC.**
-   - PCM1808 VCC on 5 V is fine, but put a ferrite plus LC filter in front of it, because
-     the Pi's 5 V rail carries switching and USB noise.
-   - THAT1512 needs a split supply. A single 5 V rail can only give about ±2.5 V around a
-     mid-rail ground, so check the datasheet minimum. Putting it on the Traco's ±12 V
-     alongside the THAT1246 and DRV134s may be the better fit.
-3. **MCP1700-3.3 fed from the Pi's 3.3 V will not regulate.** An LDO needs its input above
-   3.3 V plus its dropout (~0.2 V). Feed it from 5 V instead: the MCP1700 accepts up to
-   6 V in, and the PCM5102A's analog current is well within its 250 mA limit.
-4. **Stereo out through the 2× DRV134** puts L and R on the two DAC channels. The ADC's
-   two channels are already used (L=Source, R=mic), so Source is mono. **Decided:**
-   audiod writes the same processed mono signal to both L and R. One correction curve
-   serves both speakers, which matches having a single mic.
+2. **Power and analog gain staging are now internal to the UMC202HD.** The custom board's
+   supply-rail problems (Pi 5 V → preamp/ADC analog VCC filtering, the split-supply need
+   for a mic preamp, the 3.3 V LDO dropout issue) no longer apply -- they were specific to
+   the THAT1512/PCM1808/MCP1700 parts, which are removed (see Components.md). The
+   UMC202HD is bus-powered and self-contained.
+3. **Stereo out: ADC's two channels are already used (L=Source, R=mic), so Source stays
+   mono on the way out too.** **Decided:** audiod writes the same processed mono signal
+   to both output channels. One correction curve serves both speakers, which matches
+   having a single mic. This decision is unchanged by the UMC202HD swap -- it's a
+   software choice, not a hardware one.
 
 ## Verification (once implementation starts)
 - `aplay -l`/`arecord -l` show the card; a loopback test (DAC → ADC) measures
@@ -204,7 +206,7 @@ tests/             # unit tests (biquads, ring, delay estimator) on recorded/syn
 - `cyclictest -a 3 -p 90` under `stress-ng` load on cores 0-2 confirms the RT
   isolation before audio work begins.
 - After `make deploy`, `/sys/kernel/realtime` reads 1, `apt-mark showhold` lists the RT
-  kernel, and `/proc/cmdline`, `/proc/interrupts` (I2S IRQ count rising only on CPU3),
+  kernel, and `/proc/cmdline`, `/proc/interrupts` (USB xHCI IRQ count rising only on CPU3),
   `scaling_governor` and `nft list ruleset` match the files in `os/`. From the LAN,
   the UI port and key-based SSH answer, password SSH is rejected, and every other port is
   refused or times out. From off the LAN subnet, SSH is refused too. An

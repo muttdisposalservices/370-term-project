@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 940" width="920" height="940" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>Source-vs-System DSP unit: USB audio interface wiring (block level)</title>
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#15803d"/></marker>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
+    <style>
+      .h  { font-size: 13px; font-weight: 700; fill: #111827; }
+      .t  { font-size: 12px; fill: #111827; }
+      .s  { font-size: 10.5px; fill: #374151; }
+      .note{ font-size: 10.5px; fill: #6b7280; }
+      .box{ stroke-width: 1.8; rx: 6; }
+      .an { fill: #eff6ff; stroke: #2563eb; }
+      .pi { fill: #f8fafc; stroke: #334155; }
+      .dev{ fill: #f5f3ff; stroke: #7e22ce; }
+      .pw { fill: #fef2f2; stroke: #dc2626; }
+      .wB { stroke: #2563eb; stroke-width: 2.2; fill: none; }
+      .wG { stroke: #15803d; stroke-width: 2.2; fill: none; }
+      .wR { stroke: #dc2626; stroke-width: 2.2; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="920" height="940" fill="#ffffff"/>
+
+  <text x="20" y="32" font-size="20" font-weight="700" fill="#111827">Source-vs-System DSP unit: USB audio interface wiring (block level)</text>
+  <text x="20" y="52" class="s">Raspberry Pi 5 + Behringer U-Phoria UMC202HD (USB 2.0, class-compliant, no vendor driver). Replaces the</text>
+  <text x="20" y="67" class="s">custom PCM1808/PCM5102A/THAT board from the earlier design -- see the notes box for what that removes.</text>
+
+  <!-- ================= ANALOG IN ================= -->
+  <text x="20" y="90" class="h" fill="#2563eb">ANALOG IN</text>
+
+  <rect class="box an" x="20" y="103" width="150" height="64"/>
+  <text x="95" y="124" class="h" text-anchor="middle">Desk monitor out</text>
+  <text x="95" y="141" class="s" text-anchor="middle">XLR + 1/4" TRS combo</text>
+  <text x="95" y="156" class="s" text-anchor="middle">= SOURCE (reference)</text>
+  <line class="wB" x1="170" y1="135" x2="228" y2="135" marker-end="url(#aB)"/>
+
+  <rect class="box an" x="20" y="223" width="150" height="64"/>
+  <text x="95" y="244" class="h" text-anchor="middle">Measurement mic</text>
+  <text x="95" y="261" class="s" text-anchor="middle">3-pin XLR, dynamic</text>
+  <text x="95" y="276" class="s" text-anchor="middle">= SYSTEM (what room hears)</text>
+  <line class="wB" x1="170" y1="255" x2="228" y2="255" marker-end="url(#aB)"/>
+
+  <!-- ================= USB AUDIO INTERFACE ================= -->
+  <rect class="box dev" x="230" y="90" width="340" height="200"/>
+  <text x="400" y="112" class="h" text-anchor="middle">Behringer UMC202HD</text>
+  <text x="400" y="130" class="s" text-anchor="middle">class-compliant USB 2.0 · MIDAS preamps · bus-powered</text>
+  <text x="240" y="152" class="s">Input 1 (combo XLR/TRS): line = SOURCE</text>
+  <text x="240" y="170" class="s">Input 2 (combo XLR/TRS): mic preamp ~50-60 dB = SYSTEM</text>
+  <text x="240" y="188" class="s">Output L/R (balanced 1/4" TRS, not XLR): processed</text>
+  <text x="240" y="203" class="s">mono duplicated to both -- TRS-&gt;XLR adapter cables out</text>
+  <text x="240" y="225" class="s" font-style="italic">internal ADC+DAC share one clock -&gt;</text>
+  <text x="240" y="240" class="s" font-style="italic">Source/System stay sample-aligned (now inside this box)</text>
+
+  <line class="wG" x1="570" y1="190" x2="628" y2="190" marker-start="url(#aG)" marker-end="url(#aG)"/>
+  <text x="599" y="178" class="s" text-anchor="middle">USB</text>
+  <text x="599" y="208" class="s" text-anchor="middle">full-duplex</text>
+
+  <!-- ================= Pi 5 ================= -->
+  <rect class="box pi" x="628" y="90" width="260" height="200"/>
+  <text x="758" y="112" class="h" text-anchor="middle">Raspberry Pi 5</text>
+  <text x="638" y="132" class="s">snd-usb-audio (stock driver)</text>
+  <text x="638" y="150" class="s">ALSA card: 2 ch capture + 2 ch playback</text>
+  <text x="638" y="168" class="s">audiod RT loop on core 3 (isolcpus=3)</text>
+  <text x="638" y="186" class="s">reads Source/System, writes processed</text>
+  <text x="638" y="201" class="s">mono back over the same USB link</text>
+  <text x="638" y="219" class="s">no device-tree overlay, no GPIO mute pin</text>
+
+  <!-- ================= ANALOG OUT ================= -->
+  <text x="230" y="360" class="h" fill="#2563eb">ANALOG OUT</text>
+
+  <line class="wB" x1="335" y1="290" x2="335" y2="398" marker-end="url(#aB)"/>
+  <line class="wB" x1="515" y1="290" x2="515" y2="398" marker-end="url(#aB)"/>
+
+  <rect class="box an" x="260" y="400" width="150" height="60"/>
+  <text x="335" y="423" class="h" text-anchor="middle">TRS out L</text>
+  <text x="335" y="440" class="s" text-anchor="middle">balanced 1/4", from interface</text>
+  <rect class="box an" x="440" y="400" width="150" height="60"/>
+  <text x="515" y="423" class="h" text-anchor="middle">TRS out R</text>
+  <text x="515" y="440" class="s" text-anchor="middle">balanced 1/4", from interface</text>
+  <text x="400" y="460" class="s" text-anchor="middle">TRS-&gt;XLR adapter cables (stays balanced)</text>
+  <text x="400" y="478" class="s" text-anchor="middle">-&gt; PA / speakers</text>
+
+  <!-- ================= LEGEND ================= -->
+  <rect x="20" y="510" width="400" height="90" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2" rx="6"/>
+  <text x="32" y="531" class="h">Legend</text>
+  <line class="wB" x1="32" y1="550" x2="82" y2="550"/><text x="92" y="554" class="t">analog audio (balanced, XLR or TRS)</text>
+  <line class="wG" x1="32" y1="570" x2="82" y2="570"/><text x="92" y="574" class="t">USB audio bus (isochronous, full-duplex)</text>
+  <line class="wR" x1="32" y1="590" x2="82" y2="590"/><text x="92" y="594" class="t">power (USB bus / Pi supply)</text>
+
+  <!-- ================= WHAT CHANGED ================= -->
+  <rect x="440" y="510" width="400" height="162" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2" rx="6" stroke-dasharray="6 4"/>
+  <text x="452" y="531" class="h">What this replaces</text>
+  <text x="452" y="551" class="note">No custom ADC/DAC board. Folded into the interface:</text>
+  <text x="452" y="568" class="note">THAT1246, THAT1512, PCM1808, PCM5102A, DRV134 x2,</text>
+  <text x="452" y="585" class="note">24.576 MHz osc, Traco +/-12 V, MCP1700-3.3.</text>
+  <text x="452" y="606" class="note">No GPIO XSMT pin: audiod mutes by writing silence</text>
+  <text x="452" y="623" class="note">to the ALSA buffer instead (software mute).</text>
+  <text x="452" y="644" class="note">Linux: one-time "clock source N is not valid" dmesg</text>
+  <text x="452" y="661" class="note">line at probe, harmless -- VERIFY kernel includes the fix.</text>
+
+  <!-- ================= LEVELS ================= -->
+  <rect x="20" y="620" width="400" height="110" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2" rx="6"/>
+  <text x="32" y="641" class="h">Levels (no custom pad needed)</text>
+  <text x="32" y="659" class="t">Set the mic-preamp gain (interface front-panel knob) so</text>
+  <text x="32" y="677" class="t">normal SPL lands near -20 dBFS -- same target as the</text>
+  <text x="32" y="695" class="t">custom-board plan. VERIFY exact headroom once the</text>
+  <text x="32" y="713" class="t">specific interface model is chosen.</text>
+
+  <!-- ================= POWER ================= -->
+  <line x1="20" y1="760" x2="900" y2="760" stroke="#d1d5db" stroke-width="1"/>
+  <text x="20" y="785" class="h" fill="#dc2626">POWER (everything derives from the Pi's 27 W supply)</text>
+
+  <rect class="box pw" x="20" y="810" width="150" height="60"/>
+  <text x="95" y="834" class="h" text-anchor="middle">Pi 5 USB-C PSU</text>
+  <text x="95" y="851" class="s" text-anchor="middle">27 W</text>
+  <line class="wR" x1="170" y1="840" x2="228" y2="840" marker-end="url(#aR)"/>
+
+  <rect class="box pw" x="230" y="800" width="150" height="80"/>
+  <text x="305" y="824" class="h" text-anchor="middle">Pi 5 USB port</text>
+  <text x="305" y="841" class="s" text-anchor="middle">bus power to peripherals</text>
+  <text x="305" y="858" class="s" text-anchor="middle">VERIFY current budget</text>
+  <line class="wR" x1="380" y1="840" x2="438" y2="840" marker-end="url(#aR)"/>
+
+  <rect class="box pw" x="440" y="810" width="260" height="60"/>
+  <text x="570" y="834" class="h" text-anchor="middle">USB Audio Interface</text>
+  <text x="570" y="851" class="s" text-anchor="middle">bus-powered (no external PSU)</text>
+
+  <text x="20" y="900" class="note">Fallback: a powered USB hub if the interface draws more than the Pi 5's USB port budget allows.</text>
+</svg>
