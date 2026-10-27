@@ -16,7 +16,19 @@ logged. The 48-hour soak is the test suite of last resort.
 - Do not write to PROMPTLOG.md.
 - Never push to the repo. This will only be done manually.
 ## Ownership
-- TODO (will be added in M2 - Design Document)
+- Hazel:
+-- audiod: input/output daemon
+-- analyzerd: analysis and computation daemon
+-- ui: ungraded but very necessary UI
+-- tools: ungraded Python assists
+- Aaron:
+-- Hardware: Prototyping and constructing unit
+-- Makefile: nested here to be able to test 'make deploy' on LAN
+-- ctld: user input parameter control daemon
+-- dts: device tree overlay so RBP recognizes all components as one sound card
+-- os/ various OS fragments needed for boot and runtime config
+- Both:
+-- Tests: Since we're both handling different approaches (hardware implementation vs. software processing), tests should be written together. We'll also be able to reassign work where necessary when we meet for these.
 ## Style
 - Systems core: C17, -Wall -Wextra -Werror, no VLAs.
 goto-cleanup for multi-resource functions.

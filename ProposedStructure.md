@@ -18,10 +18,13 @@ Mic  ─► THAT1512 (preamp) ──┘                                         
 - **One stereo ADC for both sensors.** Source and System are sampled on the same clock edge,
   so the two channels can never drift apart. This is what makes the sensors *fuse*: any
   delay between them is acoustic, not caused by the converters.
-- **Clock topology:** 24.576 MHz = 256 × 96 kHz (or 512 × 48 kHz). Make the PCM1808 the
+- **Clock topology:** 24.576 MHz = 256 × 96 kHz. **Decided: fs = 96 kHz** (48 kHz is not
+  used). Make the PCM1808 the
   I2S **master** (it generates BCK/LRCK from SCKI). The Pi (RP1, clock-consumer mode) and the
   PCM5102A are slaves on the same BCK/LRCK. The result is one full-duplex I2S link with a
   single clock domain, so the ADC and DAC rates can't drift relative to each other.
+- **Link rates:** BCK = 64 fs = 6.144 MHz, LRCK = 96 kHz, 32-bit slots carrying 24 valid
+  bits. Each direction runs at 2 ch × 32 b × 96 kHz = 6.144 Mbit/s (768 KB/s).
 - **Kernel side:** a device-tree overlay with `simple-audio-card` (Pi as bitclock/frame
   slave) exposes one ALSA card with 2 capture channels and 2 playback channels.
 
@@ -52,9 +55,9 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   `os/rt-tune.sh`, a shell script (Python is not allowed outside `tools/`/`ui/`). It runs
   from the `systemd/rt-tune.service` oneshot, which is ordered before audiod. The Pi's
   active cooler (Components.md) keeps full clock from thermal throttling during the 48 h soak.
-- systemd is the **supervisor**. Each daemon is `Type=notify` with `WatchdogSec=` and
-  `Restart=on-failure`, which covers the CLAUDE.md requirement of a heartbeat within 60 s
-  and clean exit codes. Scheduling setup goes in the unit files (`CPUAffinity=`,
+- systemd is the **supervisor**. Each daemon is `Type=notify` with `WatchdogSec=10` and
+  `Restart=on-failure`, and sends `WATCHDOG=1` every 5 s (half the interval). This covers
+  the CLAUDE.md requirement of a heartbeat within 60 s and clean exit codes. Scheduling setup goes in the unit files (`CPUAffinity=`,
   `CPUSchedulingPolicy=fifo`, `CPUSchedulingPriority=`, `LimitMEMLOCK=infinity`), not in
   code. Open every fd with `O_CLOEXEC` so restarts don't leave orphaned fds.
 - **audiod's watchdog ping comes from a non-RT thread**, because `sd_notify` is a syscall
@@ -72,23 +75,51 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 
 | Process | Lang / dir | Sched / core | Job |
 |---|---|---|---|
-| **audiod** | C17, `src/audio/` | SCHED_FIFO 80, core 3, `mlockall` | ALSA `hw:` mmap full-duplex loop. Per period it reads L/R, applies the current EQ biquads and dynamics (comp/gate/**limiter**) to Source, writes to the DAC, and pushes raw L/R into the analysis ring. No malloc, no syscalls that block, no logging in the loop. |
-| **analyzerd** | C17, `analysis/` | SCHED_OTHER (or FIFO 10), core 2 | Reads the ring and estimates the acoustic delay between Source and System (cross-correlation / GCC-PHAT). It then computes the smoothed transfer function H(f) = System/Source and derives *bounded* EQ corrections. These are published as a new coefficient set. This is the graded "intelligence" and is all our code. |
-| **ctld** (or folded into the UI backend) | C17, `src/ctl/` | SCHED_OTHER, cores 0-1 | Control plane on a Unix domain socket: presets, limits, bypass, meters. It translates UI requests into parameter writes. |
-| **ui** | Python, `ui/` | cores 0-1 | LAN web interface. It talks only to ctld's socket and reads meters read-only. **No graded mechanism lives here.** |
+| **audiod** | C17, `src/audio/` | SCHED_FIFO 80, core 3, `mlockall` | ALSA `hw:` mmap full-duplex loop. Per period it reads L/R, applies the current EQ biquads (19 × 1/3-octave, float64) and dynamics (comp/gate/**limiter**) to Source, writes to the DAC, and pushes raw L/R into the analysis ring. No malloc, no syscalls that block, no logging in the loop. |
+| **analyzerd** | C17, `analysis/` | SCHED_OTHER (or FIFO 10), core 2 | Reads the ring and estimates the acoustic delay between Source and System (cross-correlation / GCC-PHAT). It then computes the smoothed transfer function H(f) = System/Source and derives *bounded* EQ corrections. These are published as a new coefficient set. Analysis uses a 32768-point FFT with a hop of 8192 (341 ms window, 2.9 Hz bins, ≈ 11.7 analyses/s). This is the graded "intelligence" and is all our code. |
+| **ctld** (or folded into the UI backend) | C17, `src/ctl/` | SCHED_OTHER, cores 0-1 | Control plane on a Unix domain socket: presets, limits, bypass, meters. It translates UI requests into parameter writes and is the only producer of the param block. It samples the status block at 20 Hz and serves meters to the ui. |
+| **ui** | Python, `ui/` | cores 0-1 | LAN web interface. It talks only to ctld's socket and never maps shm. It pushes meters to the browser over a WebSocket at 20 Hz. **No graded mechanism lives here.** |
 
 ### IPC (all in shared memory via `memfd`/`shm_open`, mapped once at start)
-- **audiod → analyzerd:** a lock-free SPSC ring of interleaved (Source, System) frames.
+- **audiod → analyzerd:** a lock-free SPSC ring of interleaved (Source, System) float32
+  frames, 2^17 frames long (1 MiB, ≈ 1.37 s: one FFT window plus the 100 ms delay search
+  plus analyzer jitter). audiod pushes 64 frames (512 B) per period, i.e. 768 KB/s.
   If the analyzer falls behind, the *reader* drops frames and counts them. audiod never
   waits, which keeps the no-drop guarantee intact on the audio path.
-- **analyzerd/ctld → audiod:** a **triple-buffered** coefficient block. analyzerd
+- **analyzerd → audiod:** a **triple-buffered** coefficient block (19 biquads × 5
+  float64 coefficients = 760 B; ≤ 1.5 KB/s at the maximum publish rate). analyzerd
   publishes only when an estimate passes its gates (Source loud enough, coherence high
   enough, change big enough), and never more than about once every 0.5–1 s. To publish, it
   fills the free slot and then atomically stores that slot's index. audiod loads the index
   once at the start of each period. If the index changed, audiod ramps from the old
   coefficients to the new ones over that period and then releases the old slot. The third
   slot means analyzerd never writes into a slot audiod is still reading or ramping from.
-- **audiod → everyone:** a meter/status block (peaks, gain reduction, xrun count, heartbeat counter).
+- **ctld → audiod:** a second **triple-buffered** param block (bypass, limits, presets,
+  dynamics) with ctld as its only producer. A triple buffer allows only one writer, so
+  ctld can't share analyzerd's coefficient block. audiod loads both indices once per
+  period, so reading stays wait-free. ctld publishes on change, capped at 50/s. Bypass and
+  limits keep working while analyzerd is down.
+- **audiod → ctld:** a meter/status block (peaks, gain reduction, xrun count, heartbeat
+  counter). audiod writes it every period (1500/s) and ctld samples it at 20 Hz.
+
+### Data-flow rates (decided 2026-10-26, fs = 96 kHz)
+| Flow | Rate |
+|---|---|
+| 24.576 MHz osc → PCM1808 SCKI, PCM5102A SCK | 24.576 MHz (256 fs) |
+| PCM1808 → BCK / LRCK to RP1 and PCM5102A | BCK 6.144 MHz (64 fs), LRCK 96 kHz |
+| PCM1808 → RP1 I2S DIN; RP1 I2S DOUT → PCM5102A | 6.144 Mbit/s each way |
+| RP1 DMA ↔ ALSA mmap buffer | 768 KB/s each way; 128-frame buffer (2 × 64) |
+| DMA-completion IRQ → threaded IRQ (core 3) | ~1500/s per stream, ~3000/s total (verify in `/proc/interrupts`) |
+| audiod RT loop | 64 frames = 0.667 ms, 1500 periods/s |
+| audiod → SPSC ring | 1500 pushes/s × 512 B = 768 KB/s |
+| ring → analyzerd | ≈ 11.7 analyses/s (hop 8192) |
+| analyzerd → coeff triple buffer | ≤ 1–2 publishes/s, 760 B each, gated |
+| ctld → param triple buffer | event-driven, capped at 50/s |
+| audiod → status block | 1500 writes/s |
+| status block → ctld → Unix socket → ui | 20 Hz |
+| ui ↔ LAN browser | WebSocket push 20 Hz (a few KB/s); control requests at human rate |
+| every daemon → systemd `WATCHDOG=1` | every 5 s (`WatchdogSec=10`) |
+| audiod non-RT thread → journald, XSMT GPIO | event-driven |
 
 ## 4. Why this layout addresses "The risk" (latency)
 - Output latency depends **only** on audiod. The total is ADC filter delay + period size ×
@@ -134,7 +165,7 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 ## 6. Proposed repo layout
 ```
 Makefile           # make / test / asan / memcheck / soakcheck / deploy (installs os/, systemd/, dts/)
-src/common/        # shm ring, seqlock, logging, sd_notify wrapper
+src/common/        # shm ring, triple buffer, seqlock, logging, sd_notify wrapper
 src/audio/         # audiod
 src/ctl/           # ctld
 analysis/          # analyzerd: delay est., transfer fn, EQ solver (graded)

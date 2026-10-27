@@ -14,4 +14,5 @@
 - Updated repo.
 
 ## 10/26 [Hazel]
-- Pointed Claude to proposed structure and asked for help making an architecture diagram. Clarified specific rates, buffer quantities, and EQ specifications.
+- Pointed Claude to proposed structure and asked for help making an architecture diagram. Clarified specific rates, buffer quantities, and EQ specifications. Clarified diagram type (also to exclude the section 3.2 bit from the sample diagram lol) and pushed to include a legend. Moving to failure-mode table.
+- Updated ownership in CLAUDE.md.
