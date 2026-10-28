@@ -8,7 +8,7 @@
 # Soak sanity:   make soakcheck          (1-hour miniature of the 48h run)
 # Cross/deploy:  make deploy PI=pi@<host> (cross-builds, rsyncs to the Pi;
 #                copy-only -- it prints the install/restart commands to run
-#                yourself over ssh, it does not run them for you)
+#                yourself over ssh, it does not run them for you) TODO::fix to line up with proposed structure
 # Clean:         make clean
 #
 # Until a given directory has its first .c file, the daemon that depends on

@@ -1,0 +1,7 @@
+# os/config.txt -- fragment for /boot/firmware/config.txt
+# No dtoverlay needed: UMC202HD is USB class-compliant (snd-usb-audio),
+# not I2S/device-tree (rework.md §1 -- dts/ was dropped with the old
+# custom-board design). Nothing else added yet: no hardware evidence
+# exists for any onboard-audio or USB-power setting (Components.md:37
+# flags USB bus-power as unverified). Add lines here only once real
+# dmesg/hardware evidence justifies them (CLAUDE.md).
