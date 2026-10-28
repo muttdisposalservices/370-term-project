@@ -42,7 +42,7 @@
 
   <!-- Title -->
   <text x="30" y="40" class="h1">DSP unit: runtime architecture</text>
-  <text x="30" y="64" class="sub">Raspberry Pi 5 · PREEMPT_RT · Behringer UMC202HD (USB 2.0, class-compliant, 44.1-192 kHz) · fs and period size set by the ALSA negotiation (target 96 kHz, 64-frame periods — VERIFY against the device) · output latency = audiod loop + USB isochronous buffering (VERIFY via loopback) · analysis is a slow closed loop (seconds) and never delays audio</text>
+  <text x="30" y="64" class="sub">Raspberry Pi 5 · PREEMPT_RT · Behringer UMC202HD (USB 2.0, class-compliant, 44.1-192 kHz) · fs and period size set by the ALSA negotiation (target 96 kHz, 48-frame periods, 96 as fallback — VERIFY against the device) · output latency = audiod loop + USB isochronous buffering (VERIFY via loopback) · analysis is a slow closed loop (seconds) and never delays audio</text>
 
   <!-- Supervision bus (systemd → audiod over the top) -->
   <path class="sv" d="M1545,120 V100 H230 V118" marker-end="url(#ms)"/>
@@ -56,7 +56,7 @@
   <text x="230" y="165" class="s">C17 · src/audio/ · SCHED_FIFO 80 (C) · mlockall</text>
   <rect x="45" y="178" width="370" height="120" rx="4" class="slot"/>
   <text x="57" y="197" class="b">RT thread · core 3 (isolated)</text>
-  <text x="57" y="216">per period (target 64 frames @ 96 kHz — VERIFY against interface):</text>
+  <text x="57" y="216">per period (target 48 frames @ 96 kHz, 96 as fallback — VERIFY against interface):</text>
   <text x="57" y="233">read L/R → 19 biquads (EQ) → comp/gate → limiter</text>
   <text x="57" y="250">→ DAC (same mono signal on L and R)</text>
   <text x="57" y="267">→ push raw L/R to ring · update status block</text>
@@ -67,12 +67,12 @@
   <text x="57" y="362">drains xrun/events to journald (monotonic time)</text>
   <text x="57" y="379">mutes by writing silence to ALSA (no GPIO pin needed)</text>
 
-  <!-- shared memory (D) -->
+  <!-- shared memory -->
   <rect x="550" y="120" width="320" height="290" rx="6" class="proc"/>
-  <text x="710" y="146" class="t">shared memory (D)</text>
+  <text x="710" y="146" class="t">shared memory</text>
   <text x="710" y="164" class="s">/dev/shm · mapped once · survives restarts</text>
   <rect x="562" y="174" width="296" height="54" rx="4" class="slot"/>
-  <text x="572" y="192" class="b">SPSC no-drop ring (F)</text>
+  <text x="572" y="192" class="b">SPSC ring, writer never blocks (F)</text>
   <text x="572" y="208" class="agr">2¹⁷ frames × 2 ch float32 = 1 MiB (≈ 1.37 s)</text>
   <text x="572" y="223">writer never waits · generation counter</text>
   <rect x="562" y="236" width="296" height="50" rx="4" class="slot"/>
@@ -87,7 +87,7 @@
 
   <!-- audiod ↔ shm -->
   <path class="dat" d="M432,201 H560" marker-end="url(#md)"/>
-  <text x="494" y="195" class="lc">1500/s × 512 B</text>
+  <text x="494" y="195" class="lc">2000/s × 384 B</text>
   <text x="494" y="215" class="lc">= 768 KB/s</text>
   <path class="dat" d="M560,261 H432" marker-end="url(#md)"/>
   <text x="494" y="255" class="lc">load idx 1×/period</text>
@@ -96,7 +96,7 @@
   <text x="494" y="315" class="lc">load idx 1×/period</text>
   <text x="494" y="335" class="lc">wait-free</text>
   <path class="dat" d="M432,377 H560" marker-end="url(#md)"/>
-  <text x="494" y="371" class="lc">write 1500/s</text>
+  <text x="494" y="371" class="lc">write 2000/s</text>
   <text x="494" y="391" class="lc">(every period)</text>
 
   <!-- analyzerd -->
@@ -169,8 +169,8 @@
   <text x="80" y="447" class="lbl">mmap R/W</text>
   <text x="80" y="463" class="lbl">768 KB/s each way</text>
   <path class="ctl" d="M330,478 V414" marker-end="url(#mc)"/>
-  <text x="322" y="447" class="lr">wake ~3000/s</text>
-  <text x="322" y="463" class="lr">1500 / stream</text>
+  <text x="322" y="447" class="lr">poll: hw ptr advance</text>
+  <text x="322" y="463" class="lr">~2000/s target; VERIFY</text>
   <path class="dat" d="M1545,414 V476" marker-start="url(#md)" marker-end="url(#md)"/>
   <text x="1555" y="447" class="lbl">WebSocket</text>
   <text x="1555" y="463" class="lbl agr">20 Hz push</text>
@@ -191,7 +191,7 @@
 
   <rect x="648" y="512" width="160" height="70" rx="4" class="kcell"/>
   <text x="728" y="534" class="kb">tmpfs /dev/shm</text>
-  <text x="728" y="551" class="k">memfd / shm_open</text>
+  <text x="728" y="551" class="k">shm_open</text>
   <text x="728" y="568" class="k">4 segments</text>
 
   <rect x="828" y="512" width="230" height="70" rx="4" class="kcell"/>
@@ -214,15 +214,15 @@
   <!-- ================= HARDWARE ================= -->
   <rect x="30" y="650" width="590" height="140" rx="6" class="hw"/>
   <text x="325" y="672" class="hb">Behringer UMC202HD</text>
-  <text x="325" y="690" class="hc">class-compliant USB 2.0 · MIDAS preamps · bus-powered</text>
+  <text x="325" y="690" class="hc">class-compliant USB 2.0 · MIDAS preamps · bus-powered · +48V: OFF</text>
   <text x="325" y="707" class="hc">Input 1 (combo XLR/TRS): line = Source ← mixing desk</text>
-  <text x="325" y="724" class="hc">Input 2 (combo XLR/TRS): mic preamp ≈ 50-60 dB = System ← dynamic mic</text>
+  <text x="325" y="724" class="hc">Input 2 (combo XLR/TRS): mic preamp ≈ 50-60 dB = System ← dynamic mic (needs no +48V)</text>
   <text x="325" y="741" class="hc">Output L/R (balanced 1/4" TRS, not XLR) → TRS→XLR adapters → PA / speakers</text>
   <text x="325" y="758" class="hc it">internal ADC/DAC share one clock — Source/System stay sample-aligned</text>
   <text x="325" y="775" class="hc it">the actuator: output is hot path, not optional</text>
 
   <rect x="620" y="650" width="560" height="140" rx="6" fill="none" stroke="#b5b5b5" stroke-width="1.2" stroke-dasharray="6 4"/>
-  <text x="632" y="672" class="note">Letters mark the Section 3.2 mechanisms we use: B, C, D, E, F.</text>
+  <text x="632" y="672" class="note">Letters mark the Section 3.2 mechanisms we use: B, C, E, F.</text>
   <text x="632" y="689" class="note">No (A): stock ALSA/usb-audio driver, no custom overlay needed.</text>
   <text x="632" y="706" class="note">Known Linux quirk: one-time "clock source N is not valid" dmesg</text>
   <text x="632" y="721" class="note">line at probe (UMC-series, fixed upstream) — VERIFY kernel version.</text>
@@ -246,7 +246,7 @@
   <text x="640" y="876">control, clocks, events</text>
   <path class="sv" d="M840,872 H890" marker-end="url(#ms)"/>
   <text x="900" y="876">supervision (restart / watchdog)</text>
-  <text x="1160" y="876"><tspan class="agr">teal</tspan> = value agreed in the rate review (not yet in ProposedStructure.md)</text>
+  <text x="1160" y="876"><tspan class="agr">teal</tspan> = value agreed in the rate review</text>
 
   <!-- ================= RATE TABLE ================= -->
   <text x="30" y="910" class="b" font-size="14">Rates on every arrow (fs = 96 kHz target — VERIFY against the USB interface)</text>
@@ -276,27 +276,27 @@
     <text x="1260" y="979" class="td">class-compliant, no device-tree overlay</text>
 
     <text x="40" y="1000" class="td">USB interface → Pi, capture (L = Source, R = System)</text>
-    <text x="640" y="1000" class="td">USB isochronous IN · 48/96 kHz (VERIFY against interface)</text>
+    <text x="640" y="1000" class="td">USB isochronous IN · 96 kHz target (VERIFY against interface)</text>
     <text x="1260" y="1000" class="td">hardware (class-compliant)</text>
 
     <text x="40" y="1021" class="td">Pi → USB interface, playback (mono on L + R)</text>
     <text x="640" y="1021" class="td">USB isochronous OUT · same rate as capture</text>
-    <text x="1260" y="1021" class="td">hardware (class-compliant), §7.4</text>
+    <text x="1260" y="1021" class="td">hardware (class-compliant), §7.3</text>
 
     <text x="40" y="1042" class="td">USB host controller ↔ ALSA mmap buffer ↔ audiod</text>
     <text x="640" y="1042" class="td">rate set by ALSA period/buffer config · VERIFY round-trip via loopback</text>
     <text x="1260" y="1042" class="td">§4 (hardware changed)</text>
 
-    <text x="40" y="1063" class="td">USB completion IRQ (xHCI) → core 3 → wakes audiod</text>
+    <text x="40" y="1063" class="td">USB completion IRQ (xHCI, core 3) updates hw ptr; audiod polls it (B)</text>
     <text x="640" y="1063" class="td">rate set by period size; VERIFY in /proc/interrupts</text>
     <text x="1260" y="1063" class="td">derived; VERIFY (hardware changed)</text>
 
     <text x="40" y="1084" class="td">audiod RT loop</text>
-    <text x="640" y="1084" class="td">target: 64 frames = 0.667 ms · 1500 periods/s (sets every rate below)</text>
+    <text x="640" y="1084" class="td">target: 48 frames = 0.5 ms · 2000 periods/s (96 frames · 1000 periods/s fallback; sets every rate below)</text>
     <text x="1260" y="1084" class="td">§4 — VERIFY against interface</text>
 
     <text x="40" y="1105" class="td">audiod → SPSC ring (float32, 2¹⁷ frames = 1 MiB ≈ 1.37 s)</text>
-    <text x="640" y="1105" class="td">1500 pushes/s × 512 B = 768 KB/s</text>
+    <text x="640" y="1105" class="td">2000 pushes/s × 384 B = 768 KB/s</text>
     <text x="1260" y="1105" class="td agr">agreed (format, capacity)</text>
 
     <text x="40" y="1126" class="td">ring → analyzerd (FFT 32768, hop 8192)</text>
@@ -309,14 +309,14 @@
 
     <text x="40" y="1168" class="td">ctld → param triple buffer (bypass, limits, presets, dynamics)</text>
     <text x="640" y="1168" class="td">event-driven, capped at 50/s</text>
-    <text x="1260" y="1168" class="td agr">agreed (fixes the two-writer gap in §3)</text>
+    <text x="1260" y="1168" class="td agr">agreed</text>
 
     <text x="40" y="1189" class="td">audiod loads both triple-buffer indices; ramps over 1 period</text>
-    <text x="640" y="1189" class="td">1500/s</text>
+    <text x="640" y="1189" class="td">2000/s</text>
     <text x="1260" y="1189" class="td">§3</text>
 
     <text x="40" y="1210" class="td">audiod → meter/status block (peaks, GR, xruns, heartbeat)</text>
-    <text x="640" y="1210" class="td">1500 writes/s</text>
+    <text x="640" y="1210" class="td">2000 writes/s</text>
     <text x="1260" y="1210" class="td">§3</text>
 
     <text x="40" y="1231" class="td">status block → ctld → AF_UNIX socket → ui</text>

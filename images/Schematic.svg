@@ -35,11 +35,12 @@
   <text x="95" y="156" class="s" text-anchor="middle">= SOURCE (reference)</text>
   <line class="wB" x1="170" y1="135" x2="228" y2="135" marker-end="url(#aB)"/>
 
-  <rect class="box an" x="20" y="223" width="150" height="64"/>
-  <text x="95" y="244" class="h" text-anchor="middle">Measurement mic</text>
-  <text x="95" y="261" class="s" text-anchor="middle">3-pin XLR, dynamic</text>
+  <rect class="box an" x="20" y="223" width="150" height="76"/>
+  <text x="95" y="244" class="h" text-anchor="middle">Dynamic mic</text>
+  <text x="95" y="261" class="s" text-anchor="middle">3-pin XLR, no phantom power</text>
   <text x="95" y="276" class="s" text-anchor="middle">= SYSTEM (what room hears)</text>
-  <line class="wB" x1="170" y1="255" x2="228" y2="255" marker-end="url(#aB)"/>
+  <text x="95" y="291" class="note" text-anchor="middle">+48V: OFF</text>
+  <line class="wB" x1="170" y1="261" x2="228" y2="261" marker-end="url(#aB)"/>
 
   <!-- ================= USB AUDIO INTERFACE ================= -->
   <rect class="box dev" x="230" y="90" width="340" height="200"/>
@@ -102,10 +103,10 @@
   <!-- ================= LEVELS ================= -->
   <rect x="20" y="620" width="400" height="110" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2" rx="6"/>
   <text x="32" y="641" class="h">Levels (no custom pad needed)</text>
-  <text x="32" y="659" class="t">Set the mic-preamp gain (interface front-panel knob) so</text>
-  <text x="32" y="677" class="t">normal SPL lands near -20 dBFS -- same target as the</text>
-  <text x="32" y="695" class="t">custom-board plan. VERIFY exact headroom once the</text>
-  <text x="32" y="713" class="t">specific interface model is chosen.</text>
+  <text x="32" y="659" class="t">Set the mic-preamp gain (UMC202HD input 2 MIDAS preamp,</text>
+  <text x="32" y="677" class="t">front-panel knob) so normal SPL lands near -20 dBFS.</text>
+  <text x="32" y="695" class="t">VERIFY exact headroom against the UMC202HD's preamp spec</text>
+  <text x="32" y="713" class="t">(50-60 dB gain needed -- see Components.md).</text>
 
   <!-- ================= POWER ================= -->
   <line x1="20" y1="760" x2="900" y2="760" stroke="#d1d5db" stroke-width="1"/>
@@ -123,7 +124,7 @@
   <line class="wR" x1="380" y1="840" x2="438" y2="840" marker-end="url(#aR)"/>
 
   <rect class="box pw" x="440" y="810" width="260" height="60"/>
-  <text x="570" y="834" class="h" text-anchor="middle">USB Audio Interface</text>
+  <text x="570" y="834" class="h" text-anchor="middle">Behringer UMC202HD</text>
   <text x="570" y="851" class="s" text-anchor="middle">bus-powered (no external PSU)</text>
 
   <text x="20" y="900" class="note">Fallback: a powered USB hub if the interface draws more than the Pi 5's USB port budget allows.</text>

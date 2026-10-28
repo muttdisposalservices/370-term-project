@@ -1,4 +1,4 @@
-# Docs review: ProposedStructure.md, rework.md, images/Schematic.svg (2026-10-28)
+verify # Docs review: ProposedStructure.md, rework.md, images/Schematic.svg (2026-10-28)
 
 The design moved from a custom I2S ADC/DAC board (PCM1808/PCM5102A/THAT/osc) to a Behringer
 UMC202HD over USB. This review lists sections of the three docs (and Components.md where
@@ -101,29 +101,60 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
 
 ## C. Undefined behaviour / underspecified mechanisms
 
-1. **How the RT loop is paced (affects mechanism B).** The docs don't say how audiod waits
-   for the next period: blocking in `poll`/`snd_pcm_wait` (interrupt-driven) or spinning
-   on the hw pointer (polling).
-   - rework.md:9 and dsp:290 claim B as "xHCI IRQ → wakes audiod", but audiod never sees
-     that IRQ directly. It only gets snd-usb-audio's period-elapsed wakeup.
-   - **DECIDE** the wakeup model, which settles what B actually compares.
-2. **A 64-frame period doesn't line up with USB microframes.** At 96 kHz a high-speed
-   microframe carries 12 frames, and 64/12 = 5.33. Period-elapsed therefore lands
-   mid-packet, and wakeups jitter by up to a URB. A period of 48 or 96 frames would line
-   up. **VERIFY** against snd-usb-audio's minimum period and `nrpacks`. dsp:59 and dsp:295
-   already mark 64 frames as a VERIFY target.
-3. **The latency budget in ProposedStructure.md leaves out USB** (§4, :128-130).
-   - "ADC + period×periods + DAC" ignores the isochronous URB queue and the interface's
-     internal buffering, which are likely several ms. The ~1.3 ms figure is the I2S-era
-     number.
-   - dsp:45 already says "output latency = audiod loop + USB isochronous buffering
-     (VERIFY via loopback)", so the two docs now disagree.
-   - Measure the real value with the loopback test in Verification.
-4. **Capture/playback linkage is unspecified.** snd-usb-audio exposes capture and playback
-   as separate PCMs, and the UMC202HD uses implicit feedback (playback timing is slaved
-   to capture). The docs don't say:
-   - how the two streams are started and kept aligned (`snd_pcm_link`, start order);
-   - how both are recovered when only one of them has an xrun.
+1. **How the RT loop is paced (affects mechanism B). DECIDED (2026-10-28): polling.**
+   audiod busy-polls the ALSA mmap hw pointer each period instead of blocking in
+   `poll`/`snd_pcm_wait`. Core 3 is isolated for audiod alone, so blocking buys nothing (no
+   other work could use the freed CPU), while polling skips the scheduler wakeup
+   round-trip and needs no syscall per check. The xHCI completion IRQ (pinned to the same
+   core, §2) still runs on every USB completion; it just updates the hw pointer, rather
+   than waking a sleeper. Fixed in ProposedStructure.md §2/§3, rework.md:9, and
+   dsp-architecture.svg (wake-arrow label + rate-table row). The .png re-export is still
+   outstanding.
+2. **A 64-frame period doesn't line up with USB microframes. DECIDED (2026-10-28): target
+   48 frames, fall back to 96.** At 96 kHz a high-speed microframe carries 12 frames, and
+   64/12 = 5.33, so period-elapsed lands mid-packet and wakeups jitter by up to a URB. 48
+   frames (4 microframes, 0.5 ms, 2000 periods/s) lines up exactly and keeps audiod's own
+   buffering contribution to latency lowest, which matters given PROBLEM.md names latency
+   as the project's central risk. 96 frames (8 microframes, 1 ms, 1000 periods/s) is the
+   documented fallback if `snd-usb-audio`'s minimum period / `nrpacks` rejects 48 --
+   **VERIFY** on hardware either way. Fixed in ProposedStructure.md (§1, §3 IPC text,
+   §3 data-flow table, §4) and rework.md:20; dsp-architecture.svg's subtitle, per-period
+   label, wake-arrow rate, IPC-arrow labels and rate-table rows updated to 48/2000 with 96
+   noted as fallback.
+3. **The latency budget in ProposedStructure.md leaves out USB (§4). DECIDED (2026-10-28):
+   fixed with a cited planning range, not a guess.**
+   - "ADC + period×periods + DAC" ignored the isochronous URB queue and the interface's
+     internal buffering. dsp:45 already said "output latency = audiod loop + USB
+     isochronous buffering (VERIFY via loopback)", so the two docs disagreed.
+   - A web search for real UMC202HD measurements (no official Behringer round-trip spec
+     exists) found: a Linux/JACK test (44.1 kHz, 64-frame × 2 periods) reporting
+     output-only latency of 6.3-7.7 ms ([forum.modartt.com](https://forum.modartt.com/viewtopic.php?id=8026)),
+     and a Windows test reporting ~8 ms total processing latency, where a *smaller* buffer
+     made it worse (8 ms → 12 ms) ([JamKazam](https://jamkazam.freshdesk.com/support/solutions/articles/66000122529)).
+     `nrpacks`, the obvious kernel-side knob, was removed in Linux 3.13 and no longer
+     applies, so there's no current tunable to derive a number from either.
+   - ProposedStructure.md §1 and §4 now state **≈6-8 ms total output-path latency** as an
+     explicitly unverified planning range sourced from other OS/driver/buffer configs, not
+     ours, with the DAC→ADC loopback test in Verification as the only way to get a real
+     number for this hardware/kernel. No separate ADC/USB/DAC sub-split is claimed, since
+     the measurements don't decompose that way.
+4. **Capture/playback linkage is unspecified. DECIDED (2026-10-28).** snd-usb-audio exposes
+   capture and playback as separate PCMs, and the UMC202HD uses implicit feedback
+   (playback timing is slaved to capture).
+   - **Start order is forced, not chosen:** by USB Audio Class 2.0's definition of
+     implicit feedback, playback's OUT rate is derived from capture's IN packet pattern,
+     so capture must be prepared and started first, and must run long enough to establish
+     a stable pattern before playback starts. `snd_pcm_link()`'s simultaneous-trigger
+     semantics don't fit this sequencing and aren't used.
+   - **xrun recovery is coupled:** any xrun in either direction -- not just a capture
+     xrun, which obviously breaks playback's clock reference -- stops and relocks *both*
+     streams through the same start sequence. A playback-only xrun is deliberately not
+     recovered independently, trading a few extra ms of silence on a playback blip for
+     one restart code path instead of relying on unverified independent-recovery
+     behavior from snd-usb-audio. The settle time between starting capture and starting
+     playback is still a hardware VERIFY.
+   - Fixed in ProposedStructure.md §1 (new "Capture/playback linkage" bullet) and §5
+     (xrun bullet rewritten for the coupled restart).
 5. **Unit-level scheduling settings reach the non-RT threads.** §2 sets
    `CPUSchedulingPolicy=fifo` and `CPUAffinity=` in the unit (:63-64, dsp:144), and
    threads inherit both.
@@ -144,8 +175,9 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
    connection". How do packages get installed: a bootstrap before the firewall goes up,
    or a `.deb` pushed by `make deploy`? **DECIDE.** This also touches the network
    boundary that CLAUDE.md says is graded.
-8. **The triple-buffer release protocol is unspecified.** :96-99 says analyzerd "fills the
-   free slot", but not how it knows which slot is free.
+8. **The triple-buffer release protocol is unspecified. DEFERRED (2026-10-28) -- revisit
+   later.** :96-99 says analyzerd "fills the free slot", but not how it knows which slot is
+   free.
    - Knowing requires audiod to *publish* which slot it holds. That is a write, and the
      text only describes audiod doing loads (also dsp:93, 314).
    - During a ramp audiod holds two slots. A second publish within one period (e.g.
