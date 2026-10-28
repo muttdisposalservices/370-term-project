@@ -53,16 +53,16 @@
   <!-- audiod -->
   <rect x="30" y="120" width="400" height="290" rx="6" class="proc"/>
   <text x="230" y="146" class="t">audiod</text>
-  <text x="230" y="165" class="s">C17 · src/audio/ · SCHED_FIFO 80 (C) · mlockall</text>
+  <text x="230" y="165" class="s">C17 · src/audio/ · mlockall (process-wide)</text>
   <rect x="45" y="178" width="370" height="120" rx="4" class="slot"/>
-  <text x="57" y="197" class="b">RT thread · core 3 (isolated)</text>
+  <text x="57" y="197" class="b">RT thread · self-pins SCHED_FIFO 80 (C) · core 3 (isolated)</text>
   <text x="57" y="216">per period (target 48 frames @ 96 kHz, 96 as fallback — VERIFY against interface):</text>
   <text x="57" y="233">read L/R → 19 biquads (EQ) → comp/gate → limiter</text>
   <text x="57" y="250">→ DAC (same mono signal on L and R)</text>
   <text x="57" y="267">→ push raw L/R to ring · update status block</text>
   <text x="57" y="287" class="it">no malloc · no blocking syscalls · no logging</text>
   <rect x="45" y="308" width="370" height="92" rx="4" class="slot"/>
-  <text x="57" y="327" class="b">non-RT thread · cores 0-1</text>
+  <text x="57" y="327" class="b">non-RT thread · SCHED_OTHER, cores 0-1 (default affinity, not pinned)</text>
   <text x="57" y="345">WATCHDOG=1 <tspan class="agr">every 5 s</tspan>, only if the heartbeat advanced</text>
   <text x="57" y="362">drains xrun/events to journald (monotonic time)</text>
   <text x="57" y="379">mutes by writing silence to ALSA (no GPIO pin needed)</text>
@@ -177,7 +177,7 @@
 
   <!-- ================= KERNEL ================= -->
   <rect x="30" y="480" width="1640" height="112" rx="6" fill="#2b2d31"/>
-  <text x="44" y="501" class="kh"><tspan font-weight="700" fill="#ffffff">kernel space</tspan> · PREEMPT_RT 6.12+ · isolcpus=3 nohz_full=3 rcu_nocbs=3 · other IRQs on cores 0-1 · irqbalance off · governor = performance</text>
+  <text x="44" y="501" class="kh"><tspan font-weight="700" fill="#ffffff">kernel space</tspan> · PREEMPT_RT 6.12+ · isolcpus=3 nohz_full=3 rcu_nocbs=3 · all IRQs (incl. xHCI) on cores 0-1, none on core 3 · irqbalance off · governor = performance</text>
 
   <rect x="40" y="512" width="250" height="70" rx="4" class="kcell"/>
   <text x="165" y="534" class="kb">ALSA USB audio</text>
@@ -186,7 +186,7 @@
 
   <rect x="308" y="512" width="320" height="70" rx="4" class="kcell"/>
   <text x="468" y="534" class="kb">xHCI USB host controller (B)</text>
-  <text x="468" y="551" class="k">isochronous IN/OUT endpoints → core 3</text>
+  <text x="468" y="551" class="k">completion IRQ → cores 0-1 (not core 3)</text>
   <text x="468" y="568" class="k">no device-tree overlay needed</text>
 
   <rect x="648" y="512" width="160" height="70" rx="4" class="kcell"/>
@@ -287,7 +287,7 @@
     <text x="640" y="1042" class="td">rate set by ALSA period/buffer config · VERIFY round-trip via loopback</text>
     <text x="1260" y="1042" class="td">§4 (hardware changed)</text>
 
-    <text x="40" y="1063" class="td">USB completion IRQ (xHCI, core 3) updates hw ptr; audiod polls it (B)</text>
+    <text x="40" y="1063" class="td">USB completion IRQ (xHCI, cores 0-1) updates hw ptr; audiod polls it (B)</text>
     <text x="640" y="1063" class="td">rate set by period size; VERIFY in /proc/interrupts</text>
     <text x="1260" y="1063" class="td">derived; VERIFY (hardware changed)</text>
 

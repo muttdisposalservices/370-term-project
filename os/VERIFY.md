@@ -17,7 +17,7 @@ config, not C logic. Every item below must be checked with pasted real output
 - [ ] `/sys/kernel/realtime` == 1
 - [ ] `apt-mark showhold` lists the RT kernel package
 - [ ] `/proc/cmdline` contains `isolcpus=3 nohz_full=3 rcu_nocbs=3`
-- [ ] `/proc/interrupts` -- xHCI IRQ count rises only on CPU3 under load
+- [ ] `/proc/interrupts` -- xHCI IRQ count rises only on CPU0/CPU1, never CPU3, under load
 - [ ] `cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor` reads `performance` on
       every core
 - [ ] `nft list ruleset` matches `os/nftables.conf` (with real `LAN_SUBNET`/`UI_PORT` filled in)
@@ -26,5 +26,9 @@ config, not C logic. Every item below must be checked with pasted real output
 - [ ] From off the LAN subnet: SSH is refused too
 - [ ] An outbound probe from the Pi (e.g. `curl` to an external host) fails
 - [ ] `os/rt-tune.sh` re-run twice produces no errors (idempotency)
-- [ ] Real `/proc/interrupts` paste confirms the `xhci_hcd` IRQ(s) `rt-tune.sh` pins are
-      actually the UMC202HD's isochronous endpoints, not a shared/unrelated IRQ
+- [ ] Real `/proc/interrupts` paste confirms the `xhci_hcd` IRQ(s) land on CPU0/CPU1 and
+      that RP1's PCIe-MSI affinity is actually settable (issues.md C6) -- if it isn't,
+      `rt-tune.sh` needs a fallback and this file needs a new gap entry
+- [ ] RT kernel package was installed via apt and held *before* `nftables` was ever
+      enabled (issues.md C7) -- confirm by checking the Pi's shell history / setup log
+      predates the first `nft list ruleset` match above

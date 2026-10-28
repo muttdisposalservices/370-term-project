@@ -105,11 +105,11 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
    audiod busy-polls the ALSA mmap hw pointer each period instead of blocking in
    `poll`/`snd_pcm_wait`. Core 3 is isolated for audiod alone, so blocking buys nothing (no
    other work could use the freed CPU), while polling skips the scheduler wakeup
-   round-trip and needs no syscall per check. The xHCI completion IRQ (pinned to the same
-   core, §2) still runs on every USB completion; it just updates the hw pointer, rather
-   than waking a sleeper. Fixed in ProposedStructure.md §2/§3, rework.md:9, and
-   dsp-architecture.svg (wake-arrow label + rate-table row). The .png re-export is still
-   outstanding.
+   round-trip and needs no syscall per check. The xHCI completion IRQ (cores 0-1, not
+   core 3 -- see C6) still runs on every USB completion; it just updates the hw pointer,
+   rather than waking a sleeper, so it doesn't need to share a core with the thread it
+   updates. Fixed in ProposedStructure.md §2/§3, rework.md:9, and dsp-architecture.svg
+   (wake-arrow label + rate-table row). The .png re-export is still outstanding.
 2. **A 64-frame period doesn't line up with USB microframes. DECIDED (2026-10-28): target
    48 frames, fall back to 96.** At 96 kHz a high-speed microframe carries 12 frames, and
    64/12 = 5.33, so period-elapsed lands mid-packet and wakeups jitter by up to a URB. 48
@@ -155,26 +155,50 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
      playback is still a hardware VERIFY.
    - Fixed in ProposedStructure.md §1 (new "Capture/playback linkage" bullet) and §5
      (xrun bullet rewritten for the coupled restart).
-5. **Unit-level scheduling settings reach the non-RT threads.** §2 sets
-   `CPUSchedulingPolicy=fifo` and `CPUAffinity=` in the unit (:63-64, dsp:144), and
-   threads inherit both.
-   - audiod's "non-RT" watchdog/logging thread (:66) would therefore run as FIFO 80 on
-     the isolated core 3, which breaks "core 3 belongs to the audio thread only" (:52).
-   - dsp:65 puts that thread on "cores 0-1", but nothing says what code moves it there or
-     drops its priority.
-6. **An IRQ is pinned to the "audio-only" core.** :52 reserves core 3 for the audio thread,
-   but :53 and dsp:189 pin the xHCI IRQ / "isochronous IN/OUT endpoints" there. Two
-   further problems:
-   - One device's endpoints can't be pinned on their own. The IRQ belongs to the whole
-     RP1 xHCI controller and is shared with every USB device on it.
-   - RP1 IRQs go through PCIe MSI, whose affinity may not be settable.
-
-   **VERIFY** on hardware.
-7. **apt vs. the firewall.** §2:38-41 installs the RT kernel "from apt", but :73-74 and
-   dsp:204 drop all outbound traffic, including DNS, and say "the Pi never starts a
-   connection". How do packages get installed: a bootstrap before the firewall goes up,
-   or a `.deb` pushed by `make deploy`? **DECIDE.** This also touches the network
-   boundary that CLAUDE.md says is graded.
+5. **Unit-level scheduling settings reach the non-RT threads. DECIDED (2026-10-28): don't
+   set them at the unit level for audiod at all.** `audiod.service` previously set
+   `CPUSchedulingPolicy=fifo`/`CPUAffinity=` process-wide; since systemd has no syntax to
+   target one thread of a multi-threaded process, every subsequently `pthread_create`'d
+   thread would inherit that as its default, so audiod's non-RT watchdog/logging thread
+   would silently run as FIFO 80 on the isolated core 3 unless it remembered to demote
+   itself -- the dangerous state as the default. Instead, audiod's unit now sets only
+   `LimitMEMLOCK=infinity`; the RT thread calls `pthread_setschedparam(SCHED_FIFO, 80)` +
+   `pthread_setaffinity_np()` (core 3) on itself right after it starts -- unconditionally,
+   every time audiod starts, before it ever touches the ALSA mmap loop -- and the non-RT
+   thread is left alone at `SCHED_OTHER`/default affinity. `isolcpus=3` already keeps an
+   unaffined thread off core 3, so nothing needs to actively demote itself, and any future
+   thread is safe by default. Fixed in ProposedStructure.md §2/§3 and
+   dsp-architecture.svg's audiod box (process label, RT-thread label, non-RT-thread
+   label). The .png re-export is still outstanding.
+6. **An IRQ is pinned to the "audio-only" core. DECIDED (2026-10-28): pin none there.**
+   :52 reserved core 3 for the audio thread, but :53 and dsp:189 pinned the xHCI
+   completion IRQ there on the theory it needed to be near the RT thread it updates. It
+   doesn't: audiod polls the mmap hw pointer in memory (mechanism B) rather than blocking
+   on the IRQ, and a hardirq's memory write is visible across cores via cache coherence
+   well within a period. Co-locating it would instead have been a jitter source in its
+   own right -- a hardirq preempts even `SCHED_FIFO`, and this one fires every 0.5 ms (one
+   per USB completion), directly against "core 3 belongs to the audio thread only." It
+   also would have required pinning one device's endpoints independently of the rest of
+   the shared RP1 xHCI controller's IRQ, which isn't possible. The xHCI completion IRQ now
+   gets no special case: it moves to cores 0-1 with every other IRQ. Whether RP1's
+   PCIe-MSI IRQs accept an affinity change at all stays a **VERIFY**, but it's the same
+   VERIFY that already covered "every other IRQ," not a new one. Fixed in
+   ProposedStructure.md §2, the §3 data-flow table, and the Verification section, and in
+   dsp-architecture.svg's xHCI kernel-layer cell, rate-table row, and kernel-space banner.
+   `os/VERIFY.md`'s checklist (the CPU3-only assertion and the endpoint-specific-pin item)
+   was also stale from before this fix and is now updated. The .png re-export is still
+   outstanding.
+7. **apt vs. the firewall. DECIDED (2026-10-28): apt runs once at bring-up, before the
+   firewall is ever loaded; `make deploy` never installs packages.** The graded
+   "no network calls" rule (CLAUDE.md) is about the running product, not the one-time
+   provisioning step that puts an OS and RT kernel on the SD card before the product
+   exists, and sequencing is forced by the Makefile itself: `make deploy` is copy-only
+   (`Makefile:230-260`) and its printed install steps never touch apt, so the RT kernel
+   has to already be on the Pi before `nftables` enters the picture. Order: flash →
+   boot on an open network → `apt update && apt install` the RT kernel + `apt-mark hold`
+   (one-time) → `make deploy` → enable `os/nftables.conf`. A later kernel-package swap
+   repeats that bootstrap with the firewall not yet (re-)enabled. Fixed in
+   ProposedStructure.md §2 (networking bullet) and `os/VERIFY.md` (new checklist item).
 8. **The triple-buffer release protocol is unspecified. DEFERRED (2026-10-28) -- revisit
    later.** :96-99 says analyzerd "fills the free slot", but not how it knows which slot is
    free.

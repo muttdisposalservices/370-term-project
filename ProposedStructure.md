@@ -71,44 +71,93 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     needed), with the build notes in `os/kernel/`.
 - Cmdline `isolcpus=3 nohz_full=3 rcu_nocbs=3` (`os/cmdline.txt`). Core 3 belongs to the
   audio thread only.
-- Pin the USB xHCI completion IRQ for the UMC202HD's isochronous endpoints to core 3
-  (or its threaded IRQ at a priority above audiod). No device-tree overlay is needed --
-  the interface enumerates under stock `snd-usb-audio`.
-  Move every other IRQ to cores 0-1 and disable `irqbalance`. Set the CPU governor to
-  `performance` so frequency-scaling transitions can't add latency. Both are done by
-  `os/rt-tune.sh`, a shell script (Python is not allowed outside `tools/`/`ui/`). It runs
-  from the `systemd/rt-tune.service` oneshot, which is ordered before audiod. The Pi's
-  active cooler (Components.md) keeps full clock from thermal throttling during the 48 h soak.
+- **DECIDED (2026-10-28): no IRQ is pinned to core 3, including the xHCI one.** An
+  earlier draft pinned the USB xHCI completion IRQ to core 3 on the theory that it needed
+  to be near the RT thread it updates. It doesn't: audiod no longer blocks on it (it polls
+  the mmap hw pointer in memory, mechanism B below), and a hardirq write is visible across
+  cores via cache coherence in well under a period. Co-locating it would instead be a
+  self-inflicted jitter source -- a hardirq preempts even `SCHED_FIFO`, and this one fires
+  on every USB completion (2000/s, i.e. every 0.5 ms, the RT loop's own period), directly
+  against "core 3 belongs to the audio thread only." It would also have required pinning
+  one device's endpoints independently of the rest of the shared RP1 xHCI controller's
+  IRQ, which the controller doesn't support. So the xHCI completion IRQ gets no special
+  case: it moves to cores 0-1 along with every other IRQ, and `irqbalance` is disabled so
+  nothing drifts back onto core 3. Whether RP1's PCIe-MSI IRQs accept an affinity change
+  at all is a **VERIFY** that already applied to "every other IRQ" generically, not a new
+  risk this decision introduces. Set the CPU governor to `performance` so
+  frequency-scaling transitions can't add latency. Both are done by `os/rt-tune.sh`, a
+  shell script (Python is not allowed outside `tools/`/`ui/`). It runs from the
+  `systemd/rt-tune.service` oneshot, which is ordered before audiod. The Pi's active
+  cooler (Components.md) keeps full clock from thermal throttling during the 48 h soak.
 - **The RT loop paces itself by polling, not blocking (mechanism B).** Each period audiod
   busy-reads the ALSA mmap control page's hw pointer directly in memory instead of calling
   `poll()`/`snd_pcm_wait()`, so there's no scheduler wakeup round-trip. Core 3 is isolated
   for audiod alone, so there's no other work the CPU time freed by blocking could go to;
   polling spends that time on tighter, more deterministic period-boundary detection
-  instead. The xHCI completion IRQ (pinned to the same core, above) still runs on every
-  USB completion -- it just updates the hw pointer that the spin loop reads, rather than
-  waking a sleeping thread.
+  instead. The xHCI completion IRQ, which now runs on cores 0-1, not core 3 (above),
+  still fires on every USB completion -- it just updates the hw pointer that the spin
+  loop reads, rather than waking a sleeping thread. Since audiod never waits on it, it
+  doesn't need to share a core with the thread it updates.
 - systemd is the **supervisor**. Each daemon is `Type=notify` with `WatchdogSec=10` and
   `Restart=on-failure`, and sends `WATCHDOG=1` every 5 s (half the interval). This covers
-  the CLAUDE.md requirement of a heartbeat within 60 s and clean exit codes. Scheduling setup goes in the unit files (`CPUAffinity=`,
-  `CPUSchedulingPolicy=fifo`, `CPUSchedulingPriority=`, `LimitMEMLOCK=infinity`), not in
-  code. Open every fd with `O_CLOEXEC` so restarts don't leave orphaned fds.
+  the CLAUDE.md requirement of a heartbeat within 60 s and clean exit codes. For
+  single-threaded daemons (analyzerd, ctld), scheduling setup goes in the unit files
+  (`CPUAffinity=`, `CPUSchedulingPolicy=fifo`, `CPUSchedulingPriority=`), not in code.
+  audiod's unit sets only `LimitMEMLOCK=infinity` (for `mlockall`) -- no
+  `CPUAffinity=`/`CPUSchedulingPolicy=`, see below for why. Open every fd with
+  `O_CLOEXEC` so restarts don't leave orphaned fds.
 - **audiod's watchdog ping comes from a non-RT thread**, because `sd_notify` can block and
   the RT loop makes no blocking syscalls (it still makes non-blocking ones, e.g. the ALSA
   mmap ioctls). That thread sends `WATCHDOG=1` only if the status-block
   heartbeat counter has advanced since its last check, so a stuck RT loop still trips the
   watchdog.
-- No outbound networking (graded boundary, CLAUDE.md). `os/nftables.conf` accepts inbound
-  traffic only from the LAN subnet, and only to two ports: the UI port and SSH. SSH is
-  there for `make deploy` and is key-only (`PasswordAuthentication no`, set in
-  `os/sshd_config.d/`). Replies on those connections are allowed. Everything else, inbound
-  or outbound, is dropped: no NTP, mDNS or DNS, and the Pi never starts a connection. Logs
-  use monotonic timestamps, and the Pi is addressed by its LAN IP.
+  - **DECIDED (2026-10-28): audiod's RT thread pins itself in code; nothing demotes the
+    non-RT thread.** A unit-file `CPUAffinity=`/`CPUSchedulingPolicy=fifo` would apply to
+    the whole process at `exec`, and every subsequently `pthread_create`'d thread inherits
+    that as its default -- systemd has no syntax to target one thread of a multi-threaded
+    process. Setting it at the unit level would therefore leave the watchdog/logging
+    thread at SCHED_FIFO 80 on core 3 unless it remembered to demote itself, which is the
+    dangerous default to ship: a forgotten demotion silently puts a thread that does
+    blocking journald writes on the one core `isolcpus=3 nohz_full=3 rcu_nocbs=3` is
+    supposed to reserve for the RT loop alone, and the failure only shows up as rare
+    jitter during the soak, not as an obvious startup error.
+    Instead, audiod's RT thread calls `pthread_setschedparam(SCHED_FIFO, 80)` and
+    `pthread_setaffinity_np()` (core 3) **on itself** right after it starts. The
+    watchdog/logging thread gets no special treatment: it stays at the default
+    `SCHED_OTHER` and default affinity, and since `isolcpus=3` already removes core 3 from
+    the kernel's general scheduling domain, an unaffined thread won't land there on its
+    own. If a third thread is ever added, it's safe by default without anyone having to
+    remember to demote it. `mlockall()` is process-wide, so which thread calls it doesn't
+    matter and stays unaffected by this split.
+- No outbound networking (graded boundary, CLAUDE.md), **for the deployed product.**
+  `os/nftables.conf` accepts inbound traffic only from the LAN subnet, and only to two
+  ports: the UI port and SSH. SSH is there for `make deploy` and is key-only
+  (`PasswordAuthentication no`, set in `os/sshd_config.d/`). Replies on those connections
+  are allowed. Everything else, inbound or outbound, is dropped: no NTP, mDNS or DNS, and
+  the Pi never starts a connection. Logs use monotonic timestamps, and the Pi is addressed
+  by its LAN IP.
+  - **DECIDED (2026-10-28): apt happens once during bring-up, before this firewall is
+    ever loaded; `make deploy` never installs packages.** The RT kernel (above) comes from
+    apt, which needs outbound HTTP(S) and DNS -- exactly what this firewall drops. The
+    graded "no network calls" rule (CLAUDE.md) is about the running *product*, not the
+    one-time step that puts an OS and RT kernel on the SD card before the product exists.
+    Sequencing is forced by the Makefile itself: `make deploy` is copy-only
+    (`Makefile:230-260`) and its printed install steps never touch apt, so by construction
+    the RT kernel has to already be on the Pi before `make deploy`/`nftables` enter the
+    picture at all. In order: flash Raspberry Pi OS Lite, boot it on an open network,
+    `apt update && apt install` the RT kernel package and `apt-mark hold` it (both
+    one-time, over that normal unfirewalled connection), *then* run `make deploy` and
+    enable `os/nftables.conf` (the Makefile's own printed steps already warn to keep a
+    console session open before that, since a bad rule can lock out the only SSH path --
+    see `os/VERIFY.md`). If the RT kernel package is ever swapped later, repeat the same
+    bootstrap -- unhold, update, re-hold -- before the firewall is (re-)enabled, then
+    re-run the Verification checklist below.
 
 ## 3. Processes (the "multi-process" mechanism)
 
 | Process | Lang / dir | Sched / core | Job |
 |---|---|---|---|
-| **audiod** | C17, `src/audio/` | SCHED_FIFO 80, core 3, `mlockall` | ALSA `hw:` mmap full-duplex loop, paced by polling the mmap hw pointer each period (mechanism B) rather than blocking in `poll()`/`snd_pcm_wait()`. Per period it reads L/R, applies the current EQ biquads (19 × 1/3-octave, float64) and dynamics (comp/gate/**limiter**) to Source, writes to the DAC, and pushes raw L/R into the analysis ring. No malloc, no syscalls that block, no logging in the loop. |
+| **audiod** | C17, `src/audio/` | RT thread: SCHED_FIFO 80, core 3 (self-pinned in code, §2); non-RT thread: SCHED_OTHER, cores 0-1 (default affinity, not pinned); `mlockall` (process-wide) | ALSA `hw:` mmap full-duplex loop, paced by polling the mmap hw pointer each period (mechanism B) rather than blocking in `poll()`/`snd_pcm_wait()`. Per period it reads L/R, applies the current EQ biquads (19 × 1/3-octave, float64) and dynamics (comp/gate/**limiter**) to Source, writes to the DAC, and pushes raw L/R into the analysis ring. No malloc, no syscalls that block, no logging in the loop. |
 | **analyzerd** | C17, `analysis/` | SCHED_OTHER (or FIFO 10), core 2 | Reads the ring and estimates the acoustic delay between Source and System (cross-correlation / GCC-PHAT). It then computes the smoothed transfer function H(f) = System/Source and derives *bounded* EQ corrections. These are published as a new coefficient set. Analysis uses a 32768-point FFT with a hop of 8192 (341 ms window, 2.9 Hz bins, ≈ 11.7 analyses/s). This is the graded "intelligence" and is all our code. |
 | **ctld** | C17, `src/ctl/` | SCHED_OTHER, cores 0-1 | Control plane on a Unix domain socket: presets, limits, bypass, meters. It translates UI requests into parameter writes and is the only producer of the param block. It samples the status block at 20 Hz and serves meters to the ui. Always a separate daemon from the UI: the UI is Python and never maps shm, ctld is the sole producer of the shm param block, and CLAUDE.md keeps graded mechanisms out of Python. |
 | **ui** | Python, `ui/` | cores 0-1 | LAN web interface. It talks only to ctld's socket and never maps shm. It pushes meters to the browser over a WebSocket at 20 Hz. **No graded mechanism lives here.** |
@@ -144,7 +193,7 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 | UMC202HD → Pi 5, capture (L = Source, R = System) | USB isochronous IN, 96 kHz (VERIFY against UMC202HD) |
 | Pi 5 → UMC202HD, playback (mono on L + R) | USB isochronous OUT, same rate as capture |
 | RP1 xHCI host ↔ ALSA mmap buffer ↔ audiod | rate set by ALSA period/buffer config (VERIFY round-trip via loopback) |
-| RP1 xHCI completion IRQ → updates ALSA hw pointer (audiod polls it, never blocks) | rate set by period size (VERIFY in `/proc/interrupts`) |
+| RP1 xHCI completion IRQ (cores 0-1, not core 3) → updates ALSA hw pointer (audiod polls it, never blocks) | rate set by period size (VERIFY in `/proc/interrupts`) |
 | audiod RT loop | target: 48 frames = 0.5 ms, 2000 periods/s (96 frames = 1 ms, 1000 periods/s fallback if snd-usb-audio rejects 48 -- VERIFY against its minimum period / `nrpacks`) |
 | audiod → SPSC ring | 2000 pushes/s × 384 B = 768 KB/s |
 | ring → analyzerd | ≈ 11.7 analyses/s (hop 8192) |
@@ -252,8 +301,9 @@ tests/             # unit tests (biquads, ring, delay estimator) on recorded/syn
 - `cyclictest -a 3 -p 90` under `stress-ng` load on cores 0-2 confirms the RT
   isolation before audio work begins.
 - After `make deploy`, `/sys/kernel/realtime` reads 1, `apt-mark showhold` lists the RT
-  kernel, and `/proc/cmdline`, `/proc/interrupts` (USB xHCI IRQ count rising only on CPU3),
-  `scaling_governor` and `nft list ruleset` match the files in `os/`. From the LAN,
+  kernel, and `/proc/cmdline`, `/proc/interrupts` (USB xHCI IRQ count rising only on
+  CPU0/1, never CPU3), `scaling_governor` and `nft list ruleset` match the files in
+  `os/`. From the LAN,
   the UI port and key-based SSH answer, password SSH is rejected, and every other port is
   refused or times out. From off the LAN subnet, SSH is refused too. An
   outbound probe from the Pi (e.g. `curl` to an external host) fails.
