@@ -4,7 +4,7 @@
 
 **Yes, comfortably.**
 
-**Mechanism count:** images/dsp-architecture.svg tags B, C, D, E, F (5 of 6, only A dropped). images/Schematic.svg carries no mechanism tags — it's the hardware/wiring diagram, not the software one. None of the five mechanisms depend on which specific USB interface is plugged in — they're all Pi-side software:
+**Mechanism count:** images/dsp-architecture.svg tags B, C, E, F (4 of 6, A and D dropped — see D below). images/Schematic.svg carries no mechanism tags — it's the hardware/wiring diagram, not the software one. None of the four mechanisms depend on which specific USB interface is plugged in — they're all Pi-side software:
 
 - **B** (interrupt vs. polling) — audiod busy-polls the ALSA mmap hw pointer each period instead of blocking in `poll()`/`snd_pcm_wait()`. Core 3 is isolated for audiod alone, so blocking buys nothing (there's no other work to hand the freed CPU to), while polling skips the scheduler wakeup round-trip. The xHCI completion IRQ (pinned to the same core) still runs on every USB completion; it just updates the hw pointer the spin loop reads. Solid.
 - **C** (SCHED_FIFO RT path) — audiod on core 3. Solid.
