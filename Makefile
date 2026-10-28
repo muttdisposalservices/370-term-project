@@ -6,9 +6,10 @@
 # Sanitizers:    make asan
 # Valgrind:      make memcheck
 # Soak sanity:   make soakcheck          (1-hour miniature of the 48h run)
-# Cross/deploy:  make deploy PI=pi@<host> (cross-builds, rsyncs to the Pi;
-#                copy-only -- it prints the install/restart commands to run
-#                yourself over ssh, it does not run them for you) TODO::fix to line up with proposed structure
+# Cross/deploy:  make deploy PI=pi@<host> (cross-builds, rsyncs bin/ + os/ +
+#                systemd/ to the Pi; copy-only -- it prints the install/
+#                restart commands to run yourself over ssh, it does not run
+#                them for you)
 # Clean:         make clean
 #
 # Until a given directory has its first .c file, the daemon that depends on
@@ -238,10 +239,24 @@ deploy: check-pi cross
 	@echo ""
 	@echo "Copied to $(PI):$(DEPLOY_STAGING)/. Nothing on the Pi was restarted."
 	@echo "To install and activate, run on the Pi (or: ssh $(PI) '...'):"
+	@echo "  sudo install -m755 $(DEPLOY_STAGING)/os/rt-tune.sh /usr/local/sbin/rt-tune.sh"
 	@echo "  sudo cp $(DEPLOY_STAGING)/bin/* /usr/local/bin/"
 	@echo "  sudo cp $(DEPLOY_STAGING)/systemd/*.service /etc/systemd/system/"
 	@echo "  sudo systemctl daemon-reload"
-	@echo "  sudo systemctl enable --now audiod analyzerd ctld"
+	@echo "  # TODO: rt-tune.service doesn't exist in systemd/ yet -- add it once it lands"
+	@echo "  sudo systemctl enable --now rt-tune.service audiod analyzerd ctld"
+	@echo ""
+	@echo "  sudo cp $(DEPLOY_STAGING)/os/sshd_config.d/*.conf /etc/ssh/sshd_config.d/"
+	@echo "  sudo systemctl reload sshd"
+	@echo ""
+	@echo "  # TODO: fill in LAN_SUBNET/UI_PORT CHANGEME placeholders in os/nftables.conf"
+	@echo "  # before applying -- keep a console/physical session open, a bad rule can"
+	@echo "  # lock out the only SSH path (see os/VERIFY.md)"
+	@echo "  sudo cp $(DEPLOY_STAGING)/os/nftables.conf /etc/nftables.conf"
+	@echo "  sudo systemctl enable --now nftables"
+	@echo ""
+	@echo "  # TODO: cmdline.txt/config.txt -> /boot/firmware/ merge is manual-only,"
+	@echo "  # not scripted here yet (single-line/no-duplicate concerns); see os/VERIFY.md"
 
 # --- Cleanup ---
 clean:
