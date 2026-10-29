@@ -111,18 +111,37 @@ ctld and os/. Hardware checks on the unit are Aaron's.
       - The DC test is |mean| over the whole `SELFCHECK_MS` window, under
         `DC_BOUND` = 0.01 (−40 dBFS) (2026-10-29). A single 0.5 ms period is too short,
         since bass content looks like DC over one period.
+      - While muted and locked, the check re-runs every window until ctld's first param
+        block arrives, so the unmute rests on the most recent window (2026-10-29).
+      - Known, accepted limitation (fail-safe): a sustained loud sub-bass tone with a
+        non-whole number of cycles per window can fail every window. For example, 22 Hz
+        at −6 dBFS gives |mean| ≈ 0.029. The output stays muted while the tone lasts.
     - one valid ctld param block since this audiod started.
-  - An xrun or a non-finite output sample re-mutes.
+  - An xrun or a non-finite output sample re-mutes. Re-muting is a step to 0, and a muted
+    period is written as exact zeros.
 - **Build:**
-  - In audiod:
-    - the default state;
-    - block validation, with a rejected-block counter;
-    - the mute state machine and fade-in;
+  - Pure parts: done.
+    - biquads, flat default and coeff validation: `src/common/biquad.h`, `biquad.c`;
+    - limiter and ceiling rule: `src/common/limiter.h`, `limiter.c`;
+    - the mute state machine, self-check, fade-in and `mute_reason` bits:
+      `src/common/mutegate.h`, `mutegate.c`.
+  - Still to do in audiod:
+    - wiring the default state and those calls into the RT loop;
+    - a rejected-block counter;
     - `mute_state`/`mute_reason` in the status block.
+    - The layout for both is defined (2026-10-29): `struct status_block` in
+      `src/common/status.h` has `rejected_coeff`, `rejected_param`, `mute_state` and
+      `mute_reason`. Filling them in is the RT-loop work above.
+  - The param block's own validation waits on its layout (Aaron, ctld). The ceiling
+    predicate `limiter_ceiling_valid` is ready for it.
   - In analyzerd: on `-ESTALE` from `tbuf_publish`, reattach and republish the last
     accepted coefficient set.
-  - Tests (shared): flat biquad is unity; zeroed or unstable blocks are rejected; the gate
-    stays muted until all three conditions hold; an xrun re-mutes.
+  - Tests (shared): done for the pure parts (`tests/test_biquad.c`,
+    `tests/test_limiter.c`, `tests/test_mutegate.c`). They cover:
+    - flat biquad is unity;
+    - zeroed or unstable blocks are rejected;
+    - the gate stays muted until all three conditions hold;
+    - an xrun re-mutes.
 - **Outstanding:**
   - `SELFCHECK_MS` (proposed 250 ms) against the settle time from H3 (Aaron).
   - Aaron's ctld review (issues.md C11): ctld republishes its full param state on every
@@ -170,15 +189,32 @@ ctld and os/. Hardware checks on the unit are Aaron's.
       `WatchdogSec=10`.
     - The thread never calls alsa-lib on the RT thread's handles, so it doesn't matter
       whether `snd_pcm_drop` is safe from a second thread.
+    - The stall timer arms on the first observed heartbeat change, not on the first check
+      (2026-10-29). A slow but healthy startup (PCM open, hw_params, the C4 settle) then
+      can't trip it. A hang before the first heartbeat is covered by `READY=1` never being
+      sent (`TimeoutStartSec=15s`, F2).
+    - Once armed, any 100 ms gap trips it, so the RT thread must bump the heartbeat
+      inside its settle and relock loops too.
+    - A failed status read (`-EAGAIN`) counts as no progress.
+    - The age runs from when a change was observed, so a delayed watchdog thread detects a
+      stall late but never reports a false one.
+    - `WATCHDOG=1` can be sent unconditionally every 5 s, since a heartbeat stall would
+      already have exited.
   - A SIGSEGV or SIGKILL needs nothing extra: the process dies, the kernel closes the fd
     and the stream stops at the threshold.
   - Nothing in systemd writes silence. By `ExecStopPost=` time the stream has already
     stopped, and playing zeros there would start a new OUT stream.
 - **Build:**
   - the sw_params, in the shared start/relock function (C4);
-  - the stall check in the watchdog thread.
-- **Tests (shared):** the stall decision (heartbeat delta and elapsed time → stalled or
-  not) as a pure function in src/common/.
+  - the stall decision: done (`src/common/stall.h`, `src/common/stall.c`). Calling it from
+    the watchdog thread is still to do.
+- **Tests (shared):** done (`tests/test_stall.c`). They cover:
+  - unarmed until the first change;
+  - the exact 100 ms threshold;
+  - progress resets the timer;
+  - wraparound;
+  - no false stall from a delayed watchdog thread;
+  - detection within 100 ms plus one check interval.
 - **Outstanding:** whether the UMC202HD pops when its OUT stream stops (issues.md C14:
   Aaron). If it does, playback switches to free-running:
   - `stop_threshold` and `silence_size` = the boundary;
@@ -231,7 +267,27 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   - This works whether or not each hw-pointer check is an ioctl on arm64. If it is, the
     ioctl, and the stream lock it shares with the xHCI IRQ thread, runs a few times per
     period instead of continuously.
-- **Build:** the RT loop's wait, with the margin as a named constant.
+  - Added 2026-10-29: the loop gates on the capture PCM's avail.
+    - The re-anchor backdates by the frames already past the boundary:
+      anchor = now − (avail − period) frames.
+    - A late detection (a delayed loop, or several periods pending) therefore doesn't
+      push the next window late, and a backlog is processed straight away.
+    - With USB's chunked hw pointer the backdate can over-correct slightly, which only
+      opens the window early.
+    - The first period after `snd_pcm_start` polls for a few ms while the first URBs
+      complete. That's a one-off cost per lock.
+- **Build:**
+  - The prediction: done (`src/common/pace.h`, `src/common/pace.c`, with
+    `PACE_MARGIN_NS`).
+  - The RT loop's spin and poll around it: still to do.
+- **Tests (shared):** done (`tests/test_pace.c`). They run on a simulated hw pointer:
+  - drift at 0 and ±200 ppm;
+  - 12-frame steps with up to 30 µs of IRQ jitter;
+  - a hold-up that makes one period late;
+  - a hold-up long enough to leave two periods pending.
+
+  In every case the window never opens late, it opens at most margin + jitter + 2 µs
+  early, and a period is seen within one poll of becoming visible.
 - **Outstanding:** `strace -c` on the Pi (issues.md F1: Aaron). It settles the syscall
   question and tunes the 50 µs margin, but doesn't change the structure. Reword C1's "no
   syscall per check" rationale once it lands.

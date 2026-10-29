@@ -57,6 +57,16 @@ the other side reviews.
     - on `-EAGAIN` from `seqlock_read`, skip that 20 Hz tick;
     - on `-ESTALE` (audiod restarted), reset any deltas and read again;
     - treat a persistent `-EAGAIN` or a stalled heartbeat as audiod down.
+  - **New 2026-10-29: review the payload,** `struct status_block` in
+    `src/common/status.h` and the shared `tests/test_status.c`. Confirm ctld can live
+    with:
+    - the field meanings, including that a zeroed block (heartbeat 0, `meter_window` 0)
+      means nothing has been written yet;
+    - linear units: peaks in full scale 1, `gain_min` in [0, 1]. ctld does the dB
+      conversion;
+    - meters that cover the last two 50 ms windows, with `meter_window` there to detect
+      a skipped or repeated window;
+    - separate `rejected_coeff` and `rejected_param` counts.
   - soakcheck reads status through ctld's socket, not shm, so ctld's "query current
     meters/status" request has to serve it. CtldOutline.md and the Makefile's soakcheck
     comment ("a status-block reader") should say so.
@@ -70,6 +80,14 @@ the other side reviews.
   - serving `mute_state`/`mute_reason` from the status block in its meters/status reply.
 
   CtldOutline.md should say all three.
+  - **New 2026-10-29, for the param-block layout:**
+    - C11's shared tests require that a zeroed block is rejected. A zeroed coeff block
+      fails audiod's validation because of its all-zero numerators
+      (`src/common/biquad.c`).
+    - A zeroed **param** block has nothing like that. If its ceiling field is in dBFS,
+      0 means 0 dBFS (full scale), which passes `limiter_ceiling_valid` (finite, ≤ 0).
+    - So the layout needs a field that a zeroed slot can't satisfy, for example a
+      nonzero magic/version word per slot that audiod checks before anything else.
 - **[Aaron]** **C12. Review the segment lifecycle from the ctld side.** It's decided and
   implemented (see [resolved_issues.md](resolved_issues.md) C12). audiod is the only
   creator; ctld and analyzerd only attach. Review `src/common/shm.h` and the shared
@@ -182,6 +200,11 @@ the other side reviews.
     `-lm`, so ctld's link fails once `src/ctl/` has sources. Fix: add `-lm` to
     `LDLIBS_CTLD`, or link src/common as a static archive so each daemon pulls in only
     the objects it uses.
+    - Since then, two more src/common objects need libm (2026-10-29, checked with
+      `nm -u`): `pcmfmt.o` (`lrint`) and `limiter.o` (`pow`, `expm1`).
+    - A static archive wouldn't help ctld if it calls `limiter_ceiling_valid` for param
+      validation, since that pulls in all of `limiter.o`. Adding `-lm` is the simpler
+      fix.
 
 ## 4. systemd units
 
