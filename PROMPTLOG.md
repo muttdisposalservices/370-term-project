@@ -42,3 +42,4 @@ Pushing to repo.
 - Asked if using an existing FFT library would violate "graded intelligence" in the spirit of no LLMs, not no math. Decided on a custom iterative radix-2 FFT. Drafted implementation and tests. Tests with a flipped "twiddle" sign (FFT jargon D:) show fails while correct signage passes and asan/valgrind pass, so this is good to commit with doc updates.
 - Updated scheduling to SCHED_OTHER on core 2, and it tries a niceness level before RT classes.
 - Asked for help determining analyzerd's exit codes: 0 on clean stop, 1 on internal error, 21 on shared memory permission error. Updated docs.
+- Pushed ProposedStructure against dsp-architecture to get a revised diagram. Also update the single-threaded daemons in Proposed Structure to be SCHED_OTHER. This was my last listed issue possible before Aaron handles F14, so I can move to more verification and implementation. Committing.

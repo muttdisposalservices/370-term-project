@@ -124,8 +124,9 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   sends `READY=1` once its shm segments exist and both PCMs are locked, before unmute.
   ctld is ordered after it and the unmute needs ctld, so waiting for unmute would
   deadlock. `TimeoutStartSec=15s` (plan.md F2). For
-  single-threaded daemons (analyzerd, ctld), scheduling setup goes in the unit files
-  (`CPUAffinity=`, `CPUSchedulingPolicy=fifo`, `CPUSchedulingPriority=`), not in code.
+  single-threaded daemons (analyzerd, ctld), scheduling setup goes in the unit files,
+  not in code. Both stay `SCHED_OTHER` (no `CPUSchedulingPolicy=`), and analyzerd gets
+  `CPUAffinity=2` (plan.md F6).
   audiod's unit sets only `LimitMEMLOCK=infinity` (for `mlockall`) -- no
   `CPUAffinity=`/`CPUSchedulingPolicy=`, see below for why. Open every fd with
   `O_CLOEXEC` so restarts don't leave orphaned fds.

@@ -238,9 +238,6 @@ the other side reviews.
 - **[Aaron]** **D3. The audio path works without the mic.**
   rework.md:30 says "nothing here works if either sensor is missing data". Without the
   mic, only the analyzer freezes (§4 gate).
-- **[Hazel]** **D4. The dsp-architecture subtitle probably runs off
-  the canvas.** dsp:45 is about 348 characters at 12.5 px starting at x=30, roughly
-  2,100 px wide on a 1,700 px canvas. Check in a browser.
 
 ## 7. Stale text that will mislead whoever implements this
 
@@ -263,9 +260,7 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - the loop side of F14, once Aaron's check is in;
-  - D4;
-  - the dsp-architecture.png re-export (plan.md).
+  - the loop side of F14, once Aaron's check is in.
 - **Aaron:**
   - the udev rule and unplug check in C13, C17, F4, the rt-tune.sh part of F11, F12 and
     F13;

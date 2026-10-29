@@ -19,10 +19,9 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   blocking in `poll()`/`snd_pcm_wait()`. Core 3 is isolated for audiod alone, so the CPU
   that blocking would free has no other use.
 - **Build:** the RT loop spins on the hw pointer and never waits on the xHCI IRQ.
-- **Outstanding:**
-  - The "no syscall per check" part of the rationale may not hold on arm64 (issues.md
-    F1, a hardware check: Aaron). The loop is time-gated either way (F1 below).
-  - Re-export `images/dsp-architecture.png` (see "Leftover actions").
+- **Outstanding:** the "no syscall per check" part of the rationale may not hold on
+  arm64 (issues.md F1, a hardware check: Aaron). The loop is time-gated either way (F1
+  below).
 
 ### C2. Period size: 48 frames, falling back to 96. Component: audiod. Owner: Hazel
 - **Decided:** at 96 kHz, 48 frames is 4 USB microframes, 0.5 ms and 2000 periods/s. If
@@ -62,7 +61,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
     and exit with a distinct code if it fails.
   - In `systemd/audiod.service`: `LimitMEMLOCK=infinity` and `LimitRTPRIO=80`, since the
     daemons don't run as root (F9 below).
-- **Outstanding:** re-export `images/dsp-architecture.png` (see "Leftover actions").
+- **Outstanding:** none.
 
 ### C6. No IRQ is pinned to core 3. Component: os. Owner: Aaron
 - **Decided:** every IRQ goes to cores 0-1, the xHCI completion IRQ included, and
@@ -70,7 +69,6 @@ ctld and os/. Hardware checks on the unit are Aaron's.
 - **Build:** done.
 - **Outstanding:**
   - Whether RP1's PCIe-MSI IRQs accept an affinity change (issues.md H4: Aaron).
-  - Re-export `images/dsp-architecture.png` (see "Leftover actions").
   - OsOutline.md still describes the old core-3 pin (issues.md "Stale text").
 
 ### C7. apt runs once at bring-up, before the firewall. Component: os. Owner: Aaron
@@ -382,10 +380,6 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   affinity covers the whole process.
 - **Outstanding:** none. If the soak shows analyses lagging because of other work on
   core 2, try `Nice=-5` (or move that work off core 2) before any RT class.
-
-## Leftover actions from these decisions
-- **Hazel:** re-export `images/dsp-architecture.png` from the SVG after the C1, C5 and C6
-  edits. The diagram is Hazel's, though it has been edited jointly.
 
 ## What can start now
 These parts depend only on decided items. All of them are Hazel's. Tests are shared

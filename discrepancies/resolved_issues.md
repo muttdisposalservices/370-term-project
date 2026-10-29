@@ -29,6 +29,7 @@ History only. Nothing here needs action.
 - **F6** was decided on 2026-10-29. It's restated in plan.md and is fully closed.
 - **F7** was closed on 2026-10-29: CLAUDE.md's Ownership section lists systemd under
   Hazel.
+- **D4** and the dsp-architecture.png re-export were fixed on 2026-10-29. Fully closed.
 
 Line references (`:NN`, `dsp:NN`) point at the files as they were when each issue was
 written, so they no longer match the current files.
@@ -641,6 +642,39 @@ Fully closed.
 - The C9 comment references in `src/common/ring.h` and `tests/test_ring.c` now point at
   resolved_issues.md, since C9 left issues.md. The `issues.md C8` references stay while
   Aaron's C8 review is open.
+
+## D4 and the dsp-architecture refresh. Fixed (2026-10-29)
+
+**Original text (issues.md §6):** The dsp-architecture subtitle probably runs off the
+canvas. dsp:45 is about 348 characters at 12.5 px starting at x=30, roughly 2,100 px wide
+on a 1,700 px canvas. Check in a browser.
+
+**Also closed:** plan.md's leftover action to re-export `images/dsp-architecture.png`
+after the C1, C5 and C6 edits. It was listed under C1, C5 and C6 as well. The old PNG
+still showed the custom PCM1808/PCM5102A board.
+
+**Fixes:**
+- Layout, confirmed with an `rsvg-convert` render:
+  - The subtitle is split onto two lines and fits.
+  - Two audiod thread lines that overflowed their slots and overprinted arrow labels
+    were shortened.
+  - The notes box no longer touches the UMC202HD box.
+  - The dead gap above the legend is closed. The canvas is now 1700×1372.
+- Content, brought in line with ProposedStructure.md's 2026-10-29 decisions:
+  - **audiod:** time-gated hw-pointer poll (F1); mute gate (C11); stall exit 12; the
+    non-RT thread never touches the ALSA handles (C14). It used to say that thread
+    "mutes by writing silence".
+  - **systemd:** READY < 15 s (F2); RestartPreventExitStatus (F10); User=dspunit and
+    BindsTo (C13, F9). This replaces "unit files set affinity + FIFO prio".
+  - **shm:** segment lifecycle (C12); claim/commit (C9); mute state and seqlock in the
+    status block.
+  - **analyzerd and ctld:** own radix-2 FFT (F5); ctld's republish lifts the mute.
+  - **Hardware row:** 48 × 2-period ALSA buffer (C15); implicit-feedback start order;
+    the clock-source quirk marked as closed by the 6.12+ kernel.
+  - **Rate table:** bases updated to match.
+- `images/dsp-architecture.png` was re-exported from the SVG at 2× (3400×2744).
+- ProposedStructure.md §2 no longer gives analyzerd and ctld unit-level
+  `CPUSchedulingPolicy=fifo`. Both stay `SCHED_OTHER`, matching §3 and plan.md F6.
 
 ## E. New: issues within images/dsp-architecture.svg. RESOLVED (0cc5520)
 
