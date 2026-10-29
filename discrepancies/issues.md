@@ -26,8 +26,8 @@ Legend:
 - **SOFT:** work can start, but this must be decided before the component is done.
 - **PROPOSED:** a recommendation only. It isn't decided.
 
-F8 was decided by C12 and is now in plan.md. C15, F2 and D2 were settled on 2026-10-29 and
-have left this file. Hazel's sides of C13, C14, C16, F1, F9, F10 (audiod) and F11 were
+F8 was decided by C12 and is now in plan.md. C15, F2, F5 and D2 were settled on 2026-10-29
+and have left this file. Hazel's sides of C13, C14, C16, F1, F9, F10 (audiod) and F11 were
 decided the same day and are in plan.md; only the remaining parts are listed below.
 
 IDs are kept from the earlier version (C8-C17, D1-D4, F1-F12; F3 became H1-H4) so
@@ -178,9 +178,11 @@ the other side reviews.
     test binary links, so it hits the same problem.
   - Fix: `filter-out` the main.c, and keep sd_notify out of src/common (or give tests
     `-lsystemd`).
-- **[Hazel]** **F5. The FFT source is undecided. SOFT.** `LDLIBS_ANALYZERD` has no FFT
-  library, which suggests writing our own 32768-point FFT. Decide our own FFT vs FFTW
-  explicitly, given the "intelligence in analysis/ is ours" boundary.
+  - Related (new 2026-10-29, from F5): `src/common/fft.c` calls `cos`/`sin`, and every
+    src/common object is linked into every daemon. `LDLIBS_CTLD` (Makefile:37) has no
+    `-lm`, so ctld's link fails once `src/ctl/` has sources. Fix: add `-lm` to
+    `LDLIBS_CTLD`, or link src/common as a static archive so each daemon pulls in only
+    the objects it uses.
 - **[Hazel]** **F6. The scheduling class is undecided. SOFT.** ProposedStructure.md:161
   says "SCHED_OTHER (or FIFO 10)". The unit file needs one answer.
 
@@ -263,7 +265,7 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - F5 and F6;
+  - F6;
   - the loop side of F14, once Aaron's check is in;
   - systemd/: F7 and the analyzerd codes in F10;
   - D4;

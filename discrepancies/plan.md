@@ -1,9 +1,9 @@
-# Plan: decided design changes (2026-10-28; C11, C13-C16, F1, F2 and F8-F11 added 2026-10-29)
+# Plan: decided design changes (2026-10-28; C11, C13-C16, F1, F2, F5 and F8-F11 added 2026-10-29)
 
 These are the decisions that came out of the docs review. Each one is already written into
 ProposedStructure.md (and the SVGs where noted). This file turns them into work: what to
 build, which component it touches, and what's still outstanding. Entries keep their
-original IDs (C1-C7, C11, C13-C16, F1, F2, F8-F11), because other files refer to them,
+original IDs (C1-C7, C11, C13-C16, F1, F2, F5, F8-F11), because other files refer to them,
 e.g. `os/rt-tune.sh` and `os/VERIFY.md` cite "issues.md C6/C7". The original issue text
 is in [resolved_issues.md](resolved_issues.md). Open questions and hardware checks stay in
 [issues.md](issues.md).
@@ -298,6 +298,34 @@ ctld and os/. Hardware checks on the unit are Aaron's.
     untuned.
   - That waits on Aaron's rt-tune.sh fix and the irqbalance masking (issues.md F11).
 
+### F5. Our own FFT, not FFTW. Components: analyzerd, src/common. Owner: Hazel
+- **Decided:**
+  - analyzerd uses our own FFT, not FFTW or any other library. CLAUDE.md's boundary bans
+    LLMs, cloud inference and pretrained models, so a math library would arguably be
+    allowed. But the boundary is graded, and writing our own removes the question.
+  - Writing our own also means:
+    - no new `-l` flag, while there's still no aarch64 sysroot (issues.md F12);
+    - no GPL code;
+    - no planner state for valgrind to report, or to slow startup.
+  - Algorithm: an n-point real transform runs as an n/2-point iterative radix-2 complex
+    FFT plus the even/odd split. Twiddles are computed directly, not by recurrence. All
+    tables and the work buffer are allocated in `fft_init`, so the transforms never
+    allocate.
+  - Load: 32768-point transforms, about 3 per analysis at ≈ 11.7 analyses/s, come to
+    roughly 90 MFLOP/s, well under 10% of one A76 core.
+  - The code lives in `src/common/`, not `analysis/`. The first `.c` in `analysis/` makes
+    the Makefile link analyzerd, which fails without a main.c (issues.md F4). The FFT is
+    a primitive, not the graded analysis.
+- **Build:** done (`src/common/fft.h`, `src/common/fft.c`).
+- **Tests (shared):** done (`tests/test_fft.c`). They cover:
+  - rejected sizes;
+  - agreement with a naive DFT at n = 4-1024;
+  - impulse, DC and single-bin cosines at n = 32768;
+  - Parseval's theorem;
+  - the forward/inverse round trip to within 1e-12.
+- **Outstanding:** `LDLIBS_CTLD` needs `-lm` before ctld gets sources, because every
+  src/common object is linked into every daemon (issues.md F4: Aaron).
+
 ## Leftover actions from these decisions
 - **Hazel:** re-export `images/dsp-architecture.png` from the SVG after the C1, C5 and C6
   edits. The diagram is Hazel's, though it has been edited jointly.
@@ -322,5 +350,7 @@ These parts depend only on decided items. All of them are Hazel's. Tests are sha
   - the exit-code header (F10).
 - **systemd/:** `audiod.service` and `rt-tune.service` (C5, C13, F2, F9, F10, F11).
 - **analyzerd:** GCC-PHAT delay estimation, H(f) smoothing and the EQ solver, as pure
-  functions in analysis/*.c files other than main.c, tested on synthetic WAVs. This works
-  until main.c lands (issues.md F4).
+  functions tested on synthetic WAVs. They go in src/common/ for now, as the FFT did
+  (F5). The first `.c` in analysis/ makes `make` link analyzerd, and that fails without a
+  main.c. Once a main.c exists, the test link fails instead (it gets two `main()`s).
+  Move them to analysis/ once Aaron's F4 fix lands.

@@ -23,6 +23,8 @@ History only. Nothing here needs action.
 - **The audiod and systemd items** (C13-C16, F1, F2, F9-F11 and D2) were decided on
   2026-10-29. C15, F2 and D2 are fully closed. The rest are restated in plan.md, and
   Aaron's remaining checks (plus analyzerd's F10 codes) are tracked in issues.md.
+- **F5** was decided and implemented on 2026-10-29. It's restated in plan.md. The `-lm`
+  note it leaves for Aaron is tracked under issues.md F4.
 
 Line references (`:NN`, `dsp:NN`) point at the files as they were when each issue was
 written, so they no longer match the current files.
@@ -572,6 +574,23 @@ error-handling policy in §5.
 
 **Fix:** ProposedStructure.md §2 now says the watchdog covers the heartbeat and hangs, and
 that exit codes come from §5 and its table. Fully closed.
+
+## F5. Decided and implemented (2026-10-29). See plan.md
+
+**Original text (issues.md §3):** The FFT source is undecided. SOFT. `LDLIBS_ANALYZERD`
+has no FFT library, which suggests writing our own 32768-point FFT. Decide our own FFT vs
+FFTW explicitly, given the "intelligence in analysis/ is ours" boundary.
+
+**Decision:** our own FFT.
+- The boundary (CLAUDE.md) bans LLMs, cloud inference and pretrained models, and an FFT
+  library is none of those. The graded intelligence is the GCC-PHAT delay estimate, the
+  H(f) smoothing and the EQ derivation, all built on top of the FFT.
+- Still, the boundary is graded, and our own FFT is about 150 lines. It also avoids a new
+  library in the missing aarch64 sysroot (F12), GPL code, and FFTW planner state under
+  valgrind.
+- It's in `src/common/fft.{h,c}` with tests in `tests/test_fft.c`. It isn't in
+  `analysis/` because of F4.
+- It leaves one Makefile item for Aaron: `LDLIBS_CTLD` needs `-lm` (issues.md F4).
 
 ## Stale text (Hazel's items). Fixed (2026-10-29)
 
