@@ -172,11 +172,14 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 - **analyzerd → audiod:** a **triple-buffered** coefficient block (19 biquads × 5
   float64 coefficients = 760 B; ≤ 1.5 KB/s at the maximum publish rate). analyzerd
   publishes only when an estimate passes its gates (Source loud enough, coherence high
-  enough, change big enough), and never more than about once every 0.5–1 s. To publish, it
-  fills the free slot and then atomically stores that slot's index. audiod loads the index
-  once at the start of each period. If the index changed, audiod ramps from the old
-  coefficients to the new ones over that period and then releases the old slot. The third
-  slot means analyzerd never writes into a slot audiod is still reading or ramping from.
+  enough, change big enough), and never more than about once every 0.5–1 s. Each side
+  privately owns one slot, and a shared atomic word names the third (the "middle") plus a
+  fresh flag and a generation (`src/common/tbuf.c`, issues.md C8). To publish, analyzerd
+  fills its own slot and swaps it into the middle with the flag set. audiod loads the word
+  once at the start of each period. Only if the flag is set does it swap its slot for the
+  middle and copy the new coefficients into private state. It then ramps from the old to the
+  new coefficients over that period using only private copies, so it never holds a second
+  slot. analyzerd therefore always has a slot of its own to write.
 - **ctld → audiod:** a second **triple-buffered** param block (bypass, limits, presets,
   dynamics) with ctld as its only producer. A triple buffer allows only one writer, so
   ctld can't share analyzerd's coefficient block. audiod loads both indices once per

@@ -8,6 +8,8 @@ History only. Nothing here needs action.
 - **C1-C7** were decided. Their original text is kept below. The decisions are restated
   as plan entries in [plan.md](plan.md), and the hardware checks they leave behind are
   tracked in [issues.md](issues.md).
+- **C8** was decided and implemented on 2026-10-29. Aaron's review of it is tracked in
+  issues.md.
 
 Line references (`:NN`, `dsp:NN`) point at the files as they were when each issue was
 written, so they no longer match the current files.
@@ -212,6 +214,39 @@ under "Stale text".)
    (one-time) → `make deploy` → enable `os/nftables.conf`. A later kernel-package swap
    repeats that bootstrap with the firewall not yet (re-)enabled. Fixed in
    ProposedStructure.md §2 (networking bullet) and `os/VERIFY.md` (new checklist item).
+
+## C8. Decided and implemented (2026-10-29)
+
+**Original text (issues.md §1):** The triple-buffer release protocol is unspecified.
+audiod consumes the block and analyzerd produces it. Aaron reviews, since ctld's param
+block uses the same protocol. :96-99 says analyzerd "fills the free slot", but not how it
+knows which slot is free.
+- Knowing requires audiod to *publish* which slot it holds. That is a write, and the text
+  only describes audiod doing loads (also dsp:93, 314).
+- During a ramp audiod holds two slots. A second publish within one period (e.g. right
+  after an audiod restart) would find no free slot.
+
+**Decision:** the standard 3-slot exchange, in `src/common/tbuf.{h,c}` (generic over the
+payload size, so the coeff block and the ctld param block share it). Tested in
+`tests/test_tbuf.c`.
+- **The shared word.** One atomic word holds `{gen:24 | fresh:1 | idx:2}`. Each side
+  privately owns one slot and the word names the third (the middle), so the producer always
+  has a free slot.
+- **Publishing.** The producer fills its slot and CAS-swaps it into the middle with `fresh`
+  set. An unread value is replaced (latest wins).
+- **audiod's poll.** audiod does one relaxed load per period. It does no store unless
+  `fresh` is set, and then it swaps.
+- **Ramping.** On a swap, audiod copies the new slot into private state and ramps between
+  private copies, so it never holds two slots.
+- **Restarts.**
+  - audiod mirrors its slot index in `front_shadow`, so a restarted producer recomputes
+    its own slot.
+  - Reading the shadow mid-swap is detectable (it equals the middle index), and attach
+    returns `-EAGAIN`.
+  - An audiod re-init bumps `gen`, so a producer from before the restart gets `-ESTALE`
+    and must reattach.
+
+ProposedStructure.md §3 (IPC, analyzerd → audiod) updated to match.
 
 ## E. New: issues within images/dsp-architecture.svg. RESOLVED (0cc5520)
 

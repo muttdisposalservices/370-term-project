@@ -20,4 +20,10 @@
 ## 10/28 [Hazel]
 - Came back to figure out what changed after Aaron redirected the project to using an external audio interface. Pointed Claude at the repo to analyze for discrepancies between multiple design documents. Put discovered problems in discrepancies/issues.md.
 - (Later) Pushed Claude to look through the current version of issues.md for anything preventing work on audiod/analyzerd/systemd. Updated issues.md to reflect Aaron's recent resolutions. Created new resolved_issues.md and plan.md files to track problem fixes, current problems, and active decisions. Added tags to each task for myself and Aaron's sakes.
-- 
+- Started working on shm contract. Began with the triple-buffer release protocol for audiod/analyzerd. Opted for triple-buffer for audiod/analyzerd; each owns one slot with one guaranteed free slot. Added common/tbuf.c, ".h and tests/test_tbuf.c. make build, test, deploy, asan pass, but there's a C++ library issue. tests for:
+--bad arguments and a bad header;
+--publish and poll, including a newer publish replacing an unread one;
+--10,000 random interleavings, checking each side always holds a different slot and that a restarted producer recovers its slot;
+--attach returning -EAGAIN when it catches audiod mid-swap, and -ESTALE after audiod re-initialises;
+--a two-process test with 20,000 publishes over a shared mapping that checks no read is ever half-written.
+Pushing to repo.

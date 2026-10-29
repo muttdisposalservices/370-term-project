@@ -40,19 +40,13 @@ Nothing defines the byte layout, magic/version or creator of any of the four seg
 settled jointly. Each item below is owned by the side that writes or creates the segment;
 the other side reviews.
 
-- **[Hazel]** **C8. The triple-buffer release protocol is unspecified. DEFERRED.** audiod
-  consumes the block and analyzerd produces it. Aaron reviews, since ctld's param block
-  uses the same protocol. :96-99 says analyzerd "fills the free slot", but not how it
-  knows which slot is free.
-  - Knowing requires audiod to *publish* which slot it holds. That is a write, and the
-    text only describes audiod doing loads (also dsp:93, 314).
-  - During a ramp audiod holds two slots. A second publish within one period (e.g. right
-    after an audiod restart) would find no free slot.
-
-  **PROPOSED:** a standard 3-slot buffer: an atomic exchange on a shared "middle" index
-  plus a fresh bit. When a ramp starts, audiod `memcpy`s the old coefficients (760 B)
-  into private state, so it only ever holds one slot. The same protocol serves the ctld
-  param block.
+- **[Aaron]** **C8. Review the triple buffer for the ctld param block.** It's decided and
+  implemented (see [resolved_issues.md](resolved_issues.md) C8). From the ctld side:
+  - Review `src/common/tbuf.h` and the shared `tests/test_tbuf.c`.
+  - Confirm ctld can live with the producer contract:
+    - retry `tbuf_producer_attach` on `-EAGAIN`;
+    - reattach on `-ESTALE` from `tbuf_publish`;
+    - give the param block a fixed `slot_size`.
 - **[Hazel]** **C9. Ring overwrite detection is unspecified.** (audiod writes the ring,
   analyzerd reads it.) For the reader to "drop frames" (:90), it has to detect that the
   writer lapped it *while* it was copying (a torn read). src/common includes a seqlock
@@ -241,7 +235,7 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - C8, C9, C10, C11, C12 and C15;
+  - C9, C10, C11, C12 and C15;
   - the code side of C14, C16 and F1;
   - F2, F5 and F6;
   - systemd/: F7, F8, F9, the audiod.service half of C13, the rt-tune.service unit in
