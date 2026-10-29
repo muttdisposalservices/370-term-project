@@ -247,9 +247,14 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
   limits keep working while analyzerd is down. After an audiod restart, both producers get
   `-ESTALE`, reattach and republish their full current state; audiod stays muted until
   ctld's republish arrives (§5, C11).
-- **audiod → ctld:** a meter/status block (peaks, gain reduction, xrun count, heartbeat
-  counter, `mute_state` and `mute_reason`, rejected-block count). audiod writes it every period (2000/s target) and ctld samples it at 20 Hz.
-  A single-writer seqlock (`src/common/seqlock.h`) protects it from torn reads. Its
+- **audiod → ctld:** a meter/status block, `struct status_block` in
+  `src/common/status.h` (peaks, gain reduction, xrun count, heartbeat counter,
+  `mute_state` and `mute_reason`, and separate rejected-block counts for coeff and param
+  blocks). audiod writes it every period (2000/s target) and ctld samples it at 20 Hz.
+  - Meters are linear and windowed, not per period: each publish covers the last two
+    50 ms windows (`METER_WINDOW_MS`) and carries a window index. So a 20 Hz reader sees
+    every sample, and can tell when it skipped or re-read a window.
+  - A single-writer seqlock (`src/common/seqlock.h`) protects it from torn reads. Its
   other reader is audiod's own watchdog thread. soakcheck reads status through ctld's
   socket, not shm (resolved_issues.md C10).
 

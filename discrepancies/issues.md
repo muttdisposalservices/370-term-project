@@ -57,6 +57,16 @@ the other side reviews.
     - on `-EAGAIN` from `seqlock_read`, skip that 20 Hz tick;
     - on `-ESTALE` (audiod restarted), reset any deltas and read again;
     - treat a persistent `-EAGAIN` or a stalled heartbeat as audiod down.
+  - **New 2026-10-29: review the payload,** `struct status_block` in
+    `src/common/status.h` and the shared `tests/test_status.c`. Confirm ctld can live
+    with:
+    - the field meanings, including that a zeroed block (heartbeat 0, `meter_window` 0)
+      means nothing has been written yet;
+    - linear units: peaks in full scale 1, `gain_min` in [0, 1]. ctld does the dB
+      conversion;
+    - meters that cover the last two 50 ms windows, with `meter_window` there to detect
+      a skipped or repeated window;
+    - separate `rejected_coeff` and `rejected_param` counts.
   - soakcheck reads status through ctld's socket, not shm, so ctld's "query current
     meters/status" request has to serve it. CtldOutline.md and the Makefile's soakcheck
     comment ("a status-block reader") should say so.

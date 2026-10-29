@@ -125,6 +125,9 @@ ctld and os/. Hardware checks on the unit are Aaron's.
     - wiring the default state and those calls into the RT loop;
     - a rejected-block counter;
     - `mute_state`/`mute_reason` in the status block.
+    - The layout for both is defined (2026-10-29): `struct status_block` in
+      `src/common/status.h` has `rejected_coeff`, `rejected_param`, `mute_state` and
+      `mute_reason`. Filling them in is the RT-loop work above.
   - The param block's own validation waits on its layout (Aaron, ctld). The ceiling
     predicate `limiter_ceiling_valid` is ready for it.
   - In analyzerd: on `-ESTALE` from `tbuf_publish`, reattach and republish the last
