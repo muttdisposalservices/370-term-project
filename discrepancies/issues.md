@@ -47,10 +47,16 @@ the other side reviews.
     - retry `tbuf_producer_attach` on `-EAGAIN`;
     - reattach on `-ESTALE` from `tbuf_publish`;
     - give the param block a fixed `slot_size`.
-- **[Hazel]** **C10. Status block consistency is unspecified.** audiod is the writer; Aaron
-  reviews as the ctld reader. audiod writes the block 2000 times/s and ctld reads it at
-  20 Hz from another process (:105-106, dsp:99, 132). No tearing protection is stated.
-  **PROPOSED:** the src/common seqlock (one writer: audiod; readers: ctld, soakcheck).
+- **[Aaron]** **C10. Review the seqlock for the status block.** It's decided and
+  implemented (see [resolved_issues.md](resolved_issues.md) C10). From the ctld side:
+  - Review `src/common/seqlock.h` and the shared `tests/test_seqlock.c`.
+  - Confirm ctld can live with the reader contract:
+    - on `-EAGAIN` from `seqlock_read`, skip that 20 Hz tick;
+    - on `-ESTALE` (audiod restarted), reset any deltas and read again;
+    - treat a persistent `-EAGAIN` or a stalled heartbeat as audiod down.
+  - soakcheck reads status through ctld's socket, not shm, so ctld's "query current
+    meters/status" request has to serve it. CtldOutline.md and the Makefile's soakcheck
+    comment ("a status-block reader") should say so.
 - **[Hazel]** **C11. Startup defaults are undefined.** Nothing says how audiod behaves
   before any coefficients exist (fresh shm) or before ctld has published params (limiter
   threshold, bypass state). audiod boots first, so this window always occurs.
@@ -122,6 +128,21 @@ the other side reviews.
 - **[Aaron]** **[HW CHECK] H3. How long should capture run before playback starts?** Left
   over from decision C4 (plan.md; Hazel owns the code). Measure the settle time from
   capture start to playback start that implicit feedback needs.
+- **[Aaron]** **F13. Every build is unoptimised (`-O0`). SOFT.** (Makefile; it affects
+  audiod's RT loop, which is Hazel's.)
+  - `CFLAGS` (Makefile:31) has `-g` but no `-O` level, so native, cross and asan builds
+    all compile at GCC's default, `-O0`.
+  - audiod's RT loop runs every 0.5 ms on core 3: 19 float64 biquads, the limiter, a ring
+    push and the status seqlock write. At `-O0` nothing is inlined or vectorised, and
+    locals are spilled to the stack. That spends period budget the design doesn't account
+    for, and it can cause soak xruns that come from the build, not the design.
+  - Some `-Werror` warnings (e.g. `-Wmaybe-uninitialized`) only fire with optimisation
+    on. Code that passes now may stop building once `-O` is added, so it's cheaper to
+    switch early.
+  - **PROPOSED:** add `-O2` to `CFLAGS` (keep `-g`), so tests run the same code generation
+    the Pi does. No `-ffast-math`, because the biquads and limiter depend on IEEE
+    behaviour. After the change, Hazel re-runs `make test`, `make asan` and
+    `make memcheck`.
 
 ## 3. analyzerd
 
@@ -226,7 +247,7 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - C10, C11, C12 and C15;
+  - C11, C12 and C15;
   - the code side of C14, C16 and F1;
   - F2, F5 and F6;
   - systemd/: F7, F8, F9, the audiod.service half of C13, the rt-tune.service unit in
@@ -234,7 +255,7 @@ the other side reviews.
   - D2 and D4;
   - the dsp-architecture.png re-export (plan.md).
 - **Aaron:**
-  - the udev rule in C13, C17, F4, the rt-tune.sh part of F11, and F12;
+  - the udev rule in C13, C17, F4, the rt-tune.sh part of F11, F12 and F13;
   - H1, H2, H3 and H4;
   - the hardware checks for C14, C16 and F1;
   - creating the service user (F9) and the ctld codes in F10;

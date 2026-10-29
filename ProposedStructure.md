@@ -190,6 +190,9 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   limits keep working while analyzerd is down.
 - **audiod → ctld:** a meter/status block (peaks, gain reduction, xrun count, heartbeat
   counter). audiod writes it every period (2000/s target) and ctld samples it at 20 Hz.
+  A single-writer seqlock (`src/common/seqlock.h`) protects it from torn reads. Its
+  other reader is audiod's own watchdog thread. soakcheck reads status through ctld's
+  socket, not shm (resolved_issues.md C10).
 
 ### Data-flow rates (decided 2026-10-26, fs = 96 kHz)
 | Flow | Rate |

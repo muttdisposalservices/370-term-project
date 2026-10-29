@@ -12,6 +12,8 @@ History only. Nothing here needs action.
   issues.md.
 - **C9** was decided and implemented on 2026-10-29. Only Hazel's daemons use the ring, so
   nothing is left in issues.md.
+- **C10** was decided and implemented on 2026-10-29. Aaron's review of it is tracked in
+  issues.md.
 - **Hazel's stale-text items** (issues.md §7) were fixed on 2026-10-29. Aaron's stale-text
   items are still tracked in issues.md.
 
@@ -285,6 +287,46 @@ over the frame size). Tested in `tests/test_ring.c`, including the mid-push case
   read. The claim check discards those copies. TSan would flag it; `make` doesn't run TSan.
 
 ProposedStructure.md §3 (IPC, audiod → analyzerd) and §5 (restart policy) updated to match.
+
+## C10. Decided and implemented (2026-10-29)
+
+**Original text (issues.md §1):** Status block consistency is unspecified. audiod is the
+writer; Aaron reviews as the ctld reader. audiod writes the block 2000 times/s and ctld
+reads it at 20 Hz from another process (:105-106, dsp:99, 132). No tearing protection is
+stated. **PROPOSED:** the src/common seqlock (one writer: audiod; readers: ctld,
+soakcheck).
+
+**Decision:** a single-writer seqlock, in `src/common/seqlock.{h,c}` (generic over the
+payload size; the status struct layout is separate shm-contract work). Tested in
+`tests/test_seqlock.c`, including a cross-process stress test that fails if the seq
+re-check is removed.
+- **Why not tbuf or ring.** tbuf allows one consumer and has audiod as its consumer. The
+  ring is a stream. Status is a snapshot with one writer and two readers, where only the
+  latest value matters.
+- **Protocol.** `seq` is even when the data is stable and odd mid-write.
+  - The writer stores `seq+1`, issues a release fence, copies the data in, then stores
+    `seq+2` (release).
+  - The reader loads `seq`, copies the data, issues an acquire fence and re-loads `seq`.
+    It keeps the copy only if the two loads are equal and even.
+- **Writer cost.** Two stores, one release fence and one small memcpy per period. The
+  writer keeps `seq` privately, so there is no RMW, no syscall and no waiting.
+- **Readers.**
+  - ctld and audiod's own watchdog thread are the readers.
+  - `seqlock_read` tries 64 times, then returns `-EAGAIN`. A write takes tens of ns on the
+    isolated core, so 64 tries span many writes but stay far below one period.
+  - A writer that dies mid-write leaves `seq` odd, so reads return `-EAGAIN` until audiod
+    restarts. The watchdog thread treats that as "heartbeat not advanced".
+- **soakcheck.** It reads status through ctld's socket, not shm. Python never maps shm,
+  the same rule the ui follows, and it couldn't do the acquire fence anyway.
+- **Generation counter.** It lives in the seqlock header.
+  - On restart, `seqlock_init` resumes a valid segment as one bracketed write: it closes
+    any open write, zeroes the data and stores the new gen. `seq` (64-bit) stays monotonic.
+  - Readers get `-ESTALE` once and then read the new gen's data.
+  - A segment with a bad header is re-initialised from scratch; recreating it is C12.
+- **Known caveat.** As with the ring, the reader's copy can race the writer's. The seq
+  check discards those copies. TSan would flag it; `make` doesn't run TSan.
+
+ProposedStructure.md §3 (IPC, audiod → ctld) and Terminology.md (seqlock) updated to match.
 
 ## Stale text (Hazel's items). Fixed (2026-10-29)
 

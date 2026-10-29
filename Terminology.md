@@ -6,7 +6,7 @@ analyzerd: the graded part. It estimates delay, computes the transfer function a
 ctld: the control daemon, not "controller". It is the control plane on a Unix socket, handling presets, limits, bypass and meters. Always a separate C17 daemon from the UI -- the UI is Python and never maps shm, and ctld is the sole producer of the shm param block.
 src/common/
 shm ring: a ring buffer in shared memory (/dev/shm), meaning a fixed-size circular queue that two processes map at the same time. Your design specifies a lock-free SPSC ring (single-producer, single-consumer): audiod writes and analyzerd reads.
-seqlock ⚠️: a sequence lock. The writer bumps a counter before and after each update. A reader retries if the counter was odd or changed while it was reading. Writers never wait, but readers may have to retry. This is the one real ambiguity in the tree. The design doc never mentions a seqlock anywhere else. Coefficients go through a triple buffer, not a seqlock. The seqlock is probably meant for the meter/status block, but the doc doesn't say so. Either say what it protects or drop it from the tree.
+seqlock: a sequence lock. The writer bumps a counter before and after each update. A reader retries if the counter was odd or changed while it was reading. Writers never wait, but readers may have to retry. It protects the audiod → ctld meter/status block (`src/common/seqlock.h`, resolved_issues.md C10). Coefficients and params go through triple buffers, not a seqlock.
 sd_notify wrapper: sd_notify() is how a daemon tells systemd "I'm ready" (READY=1) and "I'm still alive" (WATCHDOG=1). This is the "heartbeat within 60s" from CLAUDE.md. "Wrapper" means your own small function around it, so that every caller gets the error handling the rules require.
 analysis/
 delay est.: estimating how far the System signal lags behind Source, using cross-correlation or GCC-PHAT. In your design, Source is the clean input and System is what a measurement mic picks up from the room.
@@ -28,4 +28,4 @@ asan: a build with AddressSanitizer, which catches memory errors at runtime.
 memcheck: running under Valgrind's leak and invalid-access checker.
 soakcheck: a one-hour version of the 48-hour "soak" endurance run. Soaking means running continuously to catch leaks, drift and fd exhaustion.
 deploy: cross-builds, then copies binaries plus os/ and systemd/ to the Pi.
-Things to clean up: the seqlock is the one place where a reader can't tell from the tree what you mean (see issues.md C10). Everything else is standard terminology.
+Things to clean up: none. The seqlock was the last unclear term and is now settled (resolved_issues.md C10). Everything else is standard terminology.

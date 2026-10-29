@@ -31,3 +31,9 @@
 Pushing to repo.
 - Moved on to SPSC ring implementation to manage partial production/reading issues. Updated docs after other tests + ring stability test pass. Pushing to repo.
 - Pointed Claude to stale text entry of issues.md to prevent miscomm. Just edited ring details to let Aaron handle his own data.
+
+## 10/29 [Hazel]
+- Asked for walkthrough and draft of src/common seqlock for audiod>ctld status block. Gave soakcheck access to status block through ctld socket, so soakcheck isn't a seqlock reader. Did not update the status block payload struct. Seqlock used for single writer/many reader config. Implemented with tests, and stress test confirms the seqlock prevents torn reads (removed seqlock + retest > fail after with seqlock > pass). If writer dies, readers get -EAGAIN and watchdog notifies systemd. Updated docs.
+- Claude pointed out a potential race condition where the reader's memcpy outruns the writer's update, but the seqlock prevents torn reads, so that fence should be sufficient, since readers will often outpace the writer without issue by design.
+- Claude did point out that Makefile has a flag which would cause audiod's RT to not be very RT (unoptimized because of a missing -O); flagged in issues.md for Aaron.
+-  
