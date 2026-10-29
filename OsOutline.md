@@ -9,31 +9,38 @@ uncontended CPU/IRQ time and the box never originates or accepts network traffic
 LAN UI + deploy SSH (`ProposedStructure.md §2`, `CLAUDE.md` hard constraints). Owner: Aaron.
 
 ## 2. Open questions (not resolved here)
-- **`cmdline.txt`/`config.txt` merge path.** `ProposedStructure.md:34-35` says everything
-  under `os/` is "installed by `make deploy`," but `Makefile:229-244` only stages `os/` into
-  `~/dspunit-deploy/os/` on the Pi — it never touches `/boot/firmware/`. Per the user's
-  decision (see `os/VERIFY.md`), the actual merge into the live boot files is **future
-  Makefile work**, explicitly left unfinished by this pass. `os/cmdline.txt` and
-  `os/config.txt` are fragments only; nothing in `os/` applies them yet.
-- **`LAN_SUBNET` / `UI_PORT` in `nftables.conf`.** Neither value is decided anywhere in the
-  repo (confirmed by grep across all docs). `os/nftables.conf` ships with loud
-  `CHANGEME`-style placeholders; whoever deploys fills them in once `ui/`'s listen port is
-  chosen (`ui/` is Hazel's, outside this directory's scope).
-- **`rt-tune.sh`'s IRQ matching.** Whether grepping `/proc/interrupts` for `xhci_hcd` isolates
-  exactly the UMC202HD's isochronous-endpoint IRQ(s), or also catches an unrelated/shared USB
-  IRQ, is unverified without a real `/proc/interrupts` dump from the actual Pi 5 + interface
-  (`CLAUDE.md`: "Hardware bugs: paste real evidence... No fixes proposed from a verbal
-  description").
-- **`config.txt` content.** Deliberately comments-only for now (no `dtparam=audio=off`, no
-  USB bus-power setting) per the same evidence rule — `Components.md:37` already flags USB
-  bus-power as unverified, and nothing should be added until real hardware testing justifies
-  it.
+- **`cmdline.txt`/`config.txt` merge path. RESOLVED (2026-10-29).** `os/merge-boot-config.sh`
+  idempotently applies both into `/boot/firmware/` (cmdline's isolation params, config.txt's
+  RT-kernel `kernel=` selection), rsynced by `make deploy` and printed as the manual step to
+  run after (`deploy` stays copy-only by design -- see `Makefile`'s `deploy` target and
+  `setupGuide.md` §7). The script reads its values from `os/cmdline.txt`/`os/config.txt`
+  directly (its sibling files, as rsynced) rather than hardcoding its own copies, so the
+  fragment files are the actual single source of truth. Verified idempotent on real
+  hardware, both the original and the fragment-reading version.
+- **`LAN_SUBNET` / `UI_PORT` in `nftables.conf`. Partially resolved.** `LAN_SUBNET` is now
+  set (deliberately broad: all RFC1918 ranges, since the unit still moves between
+  development networks) with a flagged reminder to narrow it to the real subnet before the
+  final demo. `UI_PORT` is still undecided -- depends on `ui/`'s listen port (Hazel's,
+  outside this directory's scope).
+- **`rt-tune.sh`'s IRQ matching. RESOLVED (2026-10-29), real evidence attached.** Real
+  `/proc/interrupts` on the actual Pi 5 + UMC202HD shows the IRQs as `xhci-hcd:usb1`/
+  `xhci-hcd:usb3` -- hyphen, not underscore. The original `/xhci_hcd/` pattern never
+  matched; fixed to `/xhci[-_]hcd/`, confirmed on hardware it now isolates exactly those
+  two IRQs (not an unrelated/shared one) and sets their affinity correctly.
+- **`config.txt` content. RESOLVED (2026-10-29).** Real hardware evidence now justifies one
+  line -- `kernel=kernel8_rt.img` under `[pi5]`, needed because the Pi 5 firmware defaults
+  to `kernel_2712.img` and won't pick up the RT kernel package on its own. That line now
+  lives in `os/config.txt` itself (not hardcoded elsewhere), and `os/merge-boot-config.sh`
+  reads it from there. No other `config.txt` content (no `dtparam=audio=off`, no USB
+  bus-power setting) is justified yet -- `Components.md:37` still flags USB bus-power as
+  unverified.
 
 ## 3. Responsibilities
 - Carry the kernel cmdline fragment that isolates core 3 for `audiod`
   (`isolcpus=3 nohz_full=3 rcu_nocbs=3`) once a merge path lands it in
   `/boot/firmware/cmdline.txt`.
-- Carry any genuinely-justified Pi firmware `config.txt` fragment (currently none — see §2).
+- Carry any genuinely-justified Pi firmware `config.txt` fragment (the `[pi5] kernel=`
+  line, since 2026-10-29 — see §2).
 - Define the only firewall policy the unit runs under: LAN-only inbound to {UI port, SSH},
   zero outbound ever, matching the graded "no network calls except serving the LAN UI"
   constraint (`CLAUDE.md`).
@@ -49,18 +56,26 @@ LAN UI + deploy SSH (`ProposedStructure.md §2`, `CLAUDE.md` hard constraints). 
 ## 4. File breakdown (`os/`)
 - **`cmdline.txt`** — bare kernel cmdline fragment, one line, no comments (the real
   `/boot/firmware/cmdline.txt` must stay a single line, so this has to be directly
-  concatenable once a merge step exists).
-- **`config.txt`** — Pi firmware `config.txt` fragment; currently comments-only, explaining
-  why nothing is set yet rather than guessing.
+  concatenable). Merged by `os/merge-boot-config.sh`, which reads this file as its source
+  of truth rather than hardcoding a copy of its contents.
+- **`config.txt`** — Pi firmware `config.txt` fragment; holds the `[pi5] kernel=` line
+  (real hardware evidence, 2026-10-29) plus comments explaining why nothing else is set.
+  Merged the same way, by `os/merge-boot-config.sh` reading this file directly.
 - **`nftables.conf`** — the complete firewall ruleset (`inet filter` table, default-drop
   input/forward/output, LAN-only inbound exception for SSH + UI port, no outbound exception
   at all).
 - **`sshd_config.d/10-dspunit-key-only.conf`** — drop-in picked up automatically by
   Raspberry Pi OS's stock `sshd_config`'s `Include`; disables password and
   challenge-response auth.
-- **`rt-tune.sh`** — the one real piece of logic in this directory: POSIX `sh`, idempotent,
-  pins the UMC202HD's xHCI IRQ(s) to core 3, sweeps every other IRQ to cores 0-1 (core 2
-  stays analyzerd's), disables `irqbalance`, forces the CPU governor to `performance`.
+- **`rt-tune.sh`** — POSIX `sh`, idempotent. Moves the UMC202HD's xHCI IRQ(s), and every
+  other IRQ, to cores 0-1 -- **never core 3**, which belongs to audiod's RT thread alone
+  (core 2 stays analyzerd's; ProposedStructure.md §2 C6: a hardirq preempts even
+  `SCHED_FIFO`, so co-locating it there would be a self-inflicted jitter source, not a
+  benefit). Also disables `irqbalance` and forces the CPU governor to `performance`.
+- **`merge-boot-config.sh`** — POSIX `sh`, idempotent, applies `cmdline.txt`/`config.txt`
+  (above) into the live `/boot/firmware/` files on the Pi; the manual step that closes the
+  gap described in §6, since `make deploy` stays copy-only by design and never edits the
+  Pi's live boot config itself.
 - **`kernel/RT-KERNEL-FALLBACK.md`** — "build notes only" (`ProposedStructure.md:50`) for
   building a PREEMPT_RT kernel from `bcm2712_rt_defconfig` if the apt package fails; pure
   documentation, no companion script, by design.
@@ -71,23 +86,30 @@ These are cross-directory dependencies, not `os/`'s to decide alone:
 - `systemd/rt-tune.service` must exist, be `Type=oneshot`, and be ordered
   (`Before=audiod.service` / `Wants=`) ahead of `audiod` — the unit file itself lives in
   `systemd/`, not here.
-- `rt-tune.sh`'s `IRQ_THREAD_PRIO=85` must stay above whatever `CPUSchedulingPriority=` is
-  set to in `systemd/audiod.service` (currently assumed 80 per `ProposedStructure.md`'s
-  process table). If that priority ever changes, `rt-tune.sh` needs updating to match.
+- No scheduling-priority contract exists between `rt-tune.sh` and `audiod.service` --
+  an earlier draft assumed one (an `IRQ_THREAD_PRIO=85` meant to stay above audiod's
+  `SCHED_FIFO 80`), but that's not how IRQ/thread priority interact: a hardirq preempts
+  even `SCHED_FIFO` regardless of any priority number, which is also why no IRQ is ever
+  pinned to core 3 in the first place (ProposedStructure.md §2 C6). Core 3's protection
+  comes entirely from `isolcpus=3` (`os/cmdline.txt`) plus `rt-tune.sh` never assigning
+  any IRQ's affinity to include core 3 -- confirmed on hardware, `os/VERIFY.md`.
 - `nftables.conf`'s `UI_PORT` placeholder depends on a port number chosen in `ui/` (Hazel's
   directory) — `os/` just needs the final number once it's picked.
-- The Makefile's `deploy` target (`Makefile:229-244`) already rsyncs `os/` wholesale; any
-  future extension to actually merge `cmdline.txt`/`config.txt` into
-  `/boot/firmware/` or install `nftables.conf`/`sshd_config.d/` live on the Pi is Makefile
-  work, coordinated with whoever touches that file next (Aaron, per `CLAUDE.md` ownership).
+- The Makefile's `deploy` target (`Makefile:229-244`) already rsyncs `os/` wholesale, and now
+  prints `os/merge-boot-config.sh` as the manual step for `cmdline.txt`/`config.txt`. Installing
+  `nftables.conf`/`sshd_config.d/` live on the Pi is still unscripted, printed as separate
+  manual `cp`/`systemctl` steps by `deploy` — future Makefile work if that's ever worth
+  automating, coordinated with whoever touches that file next (Aaron, per `CLAUDE.md`
+  ownership).
 
-## 6. Known gap
+## 6. Known gap (partially resolved)
 Same shape as the `rework.md §1` / `CtldOutline.md §6` persistence gap, but on the deploy
 side rather than the storage side: the project's design docs describe `os/` as fully
-"installed by `make deploy`," but the actual Makefile only stages files — nothing currently
-applies `cmdline.txt`/`config.txt`/`nftables.conf`/`sshd_config.d/` on the Pi itself. Treated
-as unclaimed/incomplete until the Makefile (or a documented manual step) actually closes that
-loop; see `os/VERIFY.md`'s "Known gaps" section.
+"installed by `make deploy`," but the actual Makefile only stages files. **`cmdline.txt`/
+`config.txt` are now applied by `os/merge-boot-config.sh`** (manual step, printed by
+`deploy`; verified idempotent on real hardware, 2026-10-29). `nftables.conf`/
+`sshd_config.d/` are still not applied automatically — still manual `cp`/`systemctl` steps,
+same as before. See `os/VERIFY.md`'s "Known gaps" section.
 
 ## 7. Testability split (per the Makefile's existing philosophy)
 None of `os/` is covered by `make test`/`make asan`/`make memcheck` — it's boot/firewall/IRQ

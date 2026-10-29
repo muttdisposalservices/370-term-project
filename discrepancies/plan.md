@@ -67,9 +67,13 @@ ctld and os/. Hardware checks on the unit are Aaron's.
 - **Decided:** every IRQ goes to cores 0-1, the xHCI completion IRQ included, and
   `irqbalance` is disabled. This is already done in `os/rt-tune.sh` and `os/VERIFY.md`.
 - **Build:** done.
-- **Outstanding:**
-  - Whether RP1's PCIe-MSI IRQs accept an affinity change (issues.md H4: Aaron).
-  - OsOutline.md still describes the old core-3 pin (issues.md "Stale text").
+- **Outstanding:** none -- both items below resolved 2026-10-29, real evidence in
+  `os/VERIFY.md`/issues.md:
+  - ~~Whether RP1's PCIe-MSI IRQs accept an affinity change (issues.md H4: Aaron).~~
+    Resolved: yes, for the xHCI IRQs -- confirmed via `/proc/irq/<n>/smp_affinity_list`
+    reading `0-1` on real hardware.
+  - ~~OsOutline.md still describes the old core-3 pin (issues.md "Stale text").~~
+    Resolved: §4/§5 corrected to match the real script's behavior.
 
 ### C7. apt runs once at bring-up, before the firewall. Component: os. Owner: Aaron
 - **Decided:** the bring-up order is:
@@ -331,16 +335,18 @@ ctld and os/. Hardware checks on the unit are Aaron's.
     `ExecStart=/usr/local/sbin/rt-tune.sh`, `Before=audiod.service`,
     `Conflicts=irqbalance.service`. It runs as root.
   - For now, audiod.service gets `Wants=rt-tune.service` and `After=rt-tune.service`.
-    - During bring-up, a spurious rt-tune failure must not block audio. Today's example
-      is the `die` when `/xhci_hcd/` matches nothing.
+    - During bring-up, a spurious rt-tune failure must not block audio. The original
+      example was the `die` when `/xhci_hcd/` matched nothing -- **fixed and verified on
+      hardware 2026-10-29** (issues.md F11), so this is no longer a live spurious-failure
+      risk.
     - Running untuned costs jitter, which shows up as counted xruns and dropouts.
     - It costs no safety: the C11 gate and the limiter protect the drivers either way.
 - **Build:** both unit files.
 - **Outstanding:**
-  - **Hazel:** switch audiod to `Requires=rt-tune.service` once rt-tune.sh fails only on
-    real tuning failures (IRQ affinity, governor). From then on, audiod never runs
-    untuned.
-  - That waits on Aaron's rt-tune.sh fix and the irqbalance masking (issues.md F11).
+  - **Hazel:** switch audiod to `Requires=rt-tune.service` now that rt-tune.sh fails only
+    on real tuning failures (IRQ affinity, governor) -- Aaron's fix landed and is
+    confirmed on hardware (issues.md F11, os/VERIFY.md). From then on, audiod never runs
+    untuned. **This was the blocker; it's cleared.**
 
 ### F5. Our own FFT, not FFTW. Components: analyzerd, src/common. Owner: Hazel
 - **Decided:**

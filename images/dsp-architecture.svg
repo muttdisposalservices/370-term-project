@@ -232,8 +232,8 @@
   <text x="652" y="692" class="note">Letters mark the Section 3.2 mechanisms we use: B, C, E, F.</text>
   <text x="652" y="709" class="note">No (A): stock ALSA/usb-audio driver, no custom overlay needed.</text>
   <text x="652" y="732" class="note">Known Linux quirk: one-time "clock source N is not valid" dmesg</text>
-  <text x="652" y="747" class="note">line at probe (UMC-series). Fixed upstream ~5.19, so closed by</text>
-  <text x="652" y="762" class="note">the 6.12+ RT kernel; listed for completeness only.</text>
+  <text x="652" y="747" class="note">line at probe (UMC-series). CONFIRMED closed on real hardware</text>
+  <text x="652" y="762" class="note">(2026-10-29): fresh USB probe, message never appears.</text>
   <text x="652" y="785" class="note">Removed vs. the custom-board design: THAT1246, THAT1512,</text>
   <text x="652" y="800" class="note">PCM1808, PCM5102A, DRV134 ×2, 24.576 MHz osc, Traco ±12 V,</text>
   <text x="652" y="815" class="note">MCP1700-3.3 — all folded into the off-the-shelf interface.</text>

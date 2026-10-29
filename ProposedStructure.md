@@ -60,9 +60,9 @@ Mic  ─► UMC202HD input 2 (combo XLR/TRS, MIDAS preamp) ┘                  
     - `avail_min` = one period.
 - **Known quirk:** a one-time "clock source N is not valid" dmesg line at USB probe, tied to
   implicit-feedback-mode support on the UMC 202/204/404 HD series. Fixed upstream around
-  kernel 5.19+ and reported harmless once that fix is present. Since §2 already requires a
-  6.12+ RT kernel, this is effectively closed; it's listed for completeness, not as an open
-  risk.
+  kernel 5.19+. **CONFIRMED closed on real hardware (2026-10-29), not just inferred from
+  kernel version:** forced a fresh USB probe (unplug/replug while watching `dmesg`) on
+  `linux-image-rpi-v8-rt` 6.18.50+rpt-rpi-v8-rt -- the message never appears.
 
 ## 2. Base OS configuration
 Everything in this section is versioned under `os/` and `systemd/` and installed by
@@ -74,8 +74,13 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     `apt search linux-image-rpi` on the Pi before recording it here.
   - `apt-mark hold` the RT kernel package so `apt upgrade` can't swap it out during
     development or the 48 h soak. Release the hold only on purpose, then re-verify.
-  - After every deploy, check `/sys/kernel/realtime` = 1 and `uname -v` shows
-    `PREEMPT_RT`. This catches a deploy where the Pi silently boots a non-RT kernel.
+  - After every deploy, confirm PREEMPT_RT via `uname -v`/`cat /proc/version` (both should
+    show `PREEMPT_RT`) and `grep PREEMPT_RT /boot/config-$(uname -r)` (`CONFIG_PREEMPT_RT=y`).
+    **Not** `/sys/kernel/realtime` -- confirmed absent on `linux-image-rpi-v8-rt`
+    6.18.50+rpt-rpi-v8-rt despite `CONFIG_PREEMPT_RT=y` being true (that sysfs entry is a
+    downstream Debian/SUSE/RHEL ksysfs.c patch, not something upstream RT carries
+    automatically -- see `os/VERIFY.md`). This catches a deploy where the Pi silently boots
+    a non-RT kernel.
   - Confirm the benefit by measurement: `cyclictest` worst-case latency on core 3 under
     load must sit well below the ~0.67 ms period (target < 100 µs). Forum reports show
     no gain in some setups, so don't assume one.
@@ -437,7 +442,9 @@ tests/             # unit tests (biquads, ring, delay estimator) on recorded/syn
   round-trip latency with an impulse.
 - `cyclictest -a 3 -p 90` under `stress-ng` load on cores 0-2 confirms the RT
   isolation before audio work begins.
-- After `make deploy`, `/sys/kernel/realtime` reads 1, `apt-mark showhold` lists the RT
+- After `make deploy`, PREEMPT_RT is confirmed via `uname -v`/`/proc/version`/
+  `CONFIG_PREEMPT_RT=y` (not `/sys/kernel/realtime`, which doesn't exist on this kernel
+  build -- see §2 and `os/VERIFY.md`), `apt-mark showhold` lists the RT
   kernel, and `/proc/cmdline`, `/proc/interrupts` (USB xHCI IRQ count rising only on
   CPU0/1, never CPU3), `scaling_governor` and `nft list ruleset` match the files in
   `os/`. From the LAN,

@@ -201,14 +201,21 @@ the other side reviews.
   - analyzerd exits 21 on `-EACCES`/`-EPERM` from `shm_seg_attach`: a permission error
     is config, not shm state. ctld probably wants the same, which narrows the "never
     exiting over shm state" bullet in C12 above.
-- **[Aaron]** **[HW CHECK] F11. rt-tune.service can block audiod over a log line. SOFT.**
-  - `os/rt-tune.sh` `die`s if `/xhci_hcd/` matches nothing in /proc/interrupts. Since
-    C6, that match only feeds a log message.
-  - If the RP1 controller's IRQ has a different name on the Pi 5 (possibly
-    `xhci-hcd:usbN`), rt-tune.service fails. Per OsOutline.md §8 that is meant to stop
-    audiod from starting.
-  - Needs a real /proc/interrupts paste before anyone changes it (CLAUDE.md evidence
-    rule).
+- **[Aaron]** **[HW CHECK] F11. rt-tune.service can block audiod over a log line. RESOLVED
+  (2026-10-29), real evidence attached.**
+  - Confirmed exactly as predicted: the RP1 controller's IRQ is named `xhci-hcd:usb1`/
+    `xhci-hcd:usb3` on the real Pi 5 (hyphen, not underscore) -- real `/proc/interrupts`
+    paste on hardware. The original `/xhci_hcd/` awk pattern in `os/rt-tune.sh` never
+    matched, so it `die`d every run.
+  - Fixed: pattern changed to `/xhci[-_]hcd/` (matches both spellings, robust to either
+    naming on future kernels). Re-run on hardware, confirmed it now finds both IRQs and
+    sets their affinity to `0-1` (`cat /proc/irq/130/smp_affinity_list` and `/135/` both
+    read `0-1`). Also confirmed idempotent (two consecutive runs, identical output).
+  - Full evidence and the "other IRQs can't be affinitized" follow-on gap (per-CPU
+    timers/dormant display hardware, not a bug) are in `os/VERIFY.md`.
+  - Unblocks plan.md F11's outstanding item: Hazel can now switch `audiod.service` from
+    `Wants=`/`After=rt-tune.service` to `Requires=`, since rt-tune.sh no longer fails on
+    this.
   - Separately, the script runs `systemctl disable --now irqbalance` from inside a boot
     oneshot. Masking irqbalance once at deploy, plus `Conflicts=irqbalance.service` in
     the unit (now decided, plan.md F11), avoids changing unit state during boot.
@@ -219,10 +226,14 @@ the other side reviews.
   - There's no aarch64 sysroot for `-lasound`/`-lsystemd` (Makefile:27).
   - Makefile:247 enables `ctld` and `rt-tune.service`, neither of which exists yet.
   - Until the sysroot exists, build natively on the Pi.
-- **[Aaron]** **[HW CHECK] H4. Do RP1's PCIe-MSI IRQs accept an affinity change?** Left
-  over from decision C6 (plan.md). Paste `/proc/interrupts` under load showing the xHCI
-  count rising only on CPU0/1. If affinity can't be set, rt-tune.sh needs a fallback
-  (os/VERIFY.md).
+- **[Aaron]** **[HW CHECK] H4. Do RP1's PCIe-MSI IRQs accept an affinity change? RESOLVED
+  (2026-10-29), real evidence attached.** Yes, confirmed for the xHCI IRQs specifically:
+  real `/proc/interrupts` paste showed irq 130/135 (`xhci-hcd:usb1`/`usb3`) hitting CPU0
+  only before tuning; after `rt-tune.sh`, `cat /proc/irq/130/smp_affinity_list` and
+  `/135/` both read `0-1`. No fallback needed for these. A fixed subset of *other*
+  IRQs (per-CPU timers/pmu, plus dormant i2c/display hardware) can't be affinitized, but
+  that's expected (kernel property / zero-count dormant hardware), tracked separately in
+  `os/VERIFY.md`'s "Known gaps," not a RP1-PCIe-MSI-wide limitation.
 
 ## 5. Hardware
 
@@ -241,9 +252,17 @@ the other side reviews.
 
 ## 7. Stale text that will mislead whoever implements this
 
-- **[Aaron]** OsOutline.md §4 says rt-tune.sh "pins the UMC202HD's xHCI IRQ(s) to core
-  3". §5 states an `IRQ_THREAD_PRIO=85` contract against audiod's unit priority. c882d91
-  removed both.
+- **[Aaron]** OsOutline.md §4/§5 stale rt-tune.sh claims. **RESOLVED (2026-10-29).** §4
+  said rt-tune.sh "pins the UMC202HD's xHCI IRQ(s) to core 3" (backwards -- it moves them
+  to cores 0-1, never core 3) and §5 stated a fictional `IRQ_THREAD_PRIO=85` contract
+  against audiod's unit priority (the real script sets no IRQ thread priority at all;
+  hardirqs preempt `SCHED_FIFO` regardless of any priority number, per C6). Both corrected
+  to match the real script and `os/VERIFY.md`'s confirmed hardware behavior.
+- **[Hazel]** `images/dsp-architecture.png` needs re-exporting from `images/dsp-architecture.svg`
+  -- three lines of its "clock source N is not valid" quirk note were updated 2026-10-29
+  (now CONFIRMED on real hardware instead of inferred from kernel version; see
+  Components.md/ProposedStructure.md §1/os/VERIFY.md). No SVG-rendering tool was available
+  to do the re-export in that session.
 - **[Aaron]** CtldOutline.md §2 still lists "fold ctld into the UI" as open. That was
   settled by B12 (resolved_issues.md).
 - **[Aaron]** ProposedStructure.md:67 says "~0.67 ms period", which should now be 0.5 ms.
@@ -264,7 +283,7 @@ the other side reviews.
 - **Aaron:**
   - the udev rule and unplug check in C13, C17, F4, the rt-tune.sh part of F11, F12 and
     F13;
-  - H1, H2, H3 and H4;
+  - H1, H2 and H3 (H4 resolved 2026-10-29, see §4/§5);
   - the hardware checks for C14, C16, F1 and F14 (and the os/ sysctl, if chosen);
   - creating the service user and the EPERM check (F9), and the ctld codes in F10;
   - D1 and D3;

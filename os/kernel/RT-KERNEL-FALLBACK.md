@@ -14,6 +14,10 @@ If that fails or doesn't show PREEMPT_RT, build from source:
 3. `ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- make -j$(nproc) Image.gz modules dtbs`
 4. Install modules/Image/dtbs per Raspberry Pi's kernel-building docs for the Pi 5.
 5. Reboot, then verify:
-   - `cat /sys/kernel/realtime` -> 1
-   - `uname -v` -> contains "PREEMPT_RT"
+   - `uname -v`/`cat /proc/version` -> contains "PREEMPT_RT"
+   - `grep PREEMPT_RT /boot/config-$(uname -r)` -> `CONFIG_PREEMPT_RT=y`
+   - **Do not rely on `cat /sys/kernel/realtime`.** Confirmed absent on the apt-installed
+     `linux-image-rpi-v8-rt` package despite `CONFIG_PREEMPT_RT=y` being true (os/VERIFY.md)
+     -- that sysfs entry is a downstream Debian/SUSE/RHEL patch, not something a from-source
+     mainline build carries either. Use the two checks above instead.
    - `cyclictest -a 3 -p 90` under `stress-ng` load -> worst case well under 0.67 ms

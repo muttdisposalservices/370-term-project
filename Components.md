@@ -22,9 +22,10 @@ Behringer U-Phoria UMC202HD, USB 2.0, class-compliant. Decided over the earlier 
 - Enumerates under Linux's stock snd-usb-audio driver -- no vendor driver, no
   device-tree overlay. Known quirk: a one-time "clock source N is not valid" dmesg
   message at USB probe, fixed upstream via an implicit-feedback-mode quirk (merged for
-  the UMC 202/204/404 HD series around kernel 5.19+) and reported harmless once that fix
-  is present. VERIFY the Pi's kernel version includes it; if not, needs a newer
-  Raspberry Pi OS image rather than a code change.
+  the UMC 202/204/404 HD series around kernel 5.19+). **CONFIRMED on real hardware
+  (2026-10-29):** forced a fresh USB probe (unplug/replug while watching `dmesg`) on
+  `linux-image-rpi-v8-rt` 6.18.50+rpt-rpi-v8-rt -- the message does not appear at all,
+  not just absent from a stale buffer. No longer an inference from kernel version alone.
 - Bus-powered over USB (no phantom power needed; dynamic mic doesn't require +48V).
 
 ## Connections

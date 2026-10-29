@@ -103,3 +103,61 @@ nothing project-specific yet. From here:
   by the manual install steps it prints.
 - Confirm all of that actually took effect using `os/VERIFY.md`'s checklist — don't assume
   it worked from a verbal description, per `CLAUDE.md`'s hardware-evidence rule.
+
+## 7. Project-specific setup (after `make deploy`'s copy step)
+
+`make deploy` is copy-only by design — it rsyncs `bin/`/`os/`/`systemd/` to the Pi and
+prints the install steps, but never runs them for you (Makefile header comment). Do these
+by hand after a deploy, in order, confirming each against `os/VERIFY.md` with real pasted
+output as you go.
+
+1. **Install and hold the RT kernel** (needs the open network, before any firewall is
+   enabled):
+   ```
+   apt search linux-image-rpi      # confirm the exact package name on-device, don't assume
+   sudo apt install linux-image-rpi-v8-rt
+   sudo apt-mark hold linux-image-rpi-v8-rt
+   ```
+2. **Merge the boot config and select the RT kernel.** The Pi 5 firmware defaults to
+   `kernel_2712.img` and won't pick up the newly-installed RT image on its own, and
+   `cmdline.txt` needs the CPU-isolation params appended without duplicating them on a
+   repeat deploy. `os/merge-boot-config.sh` (rsynced to the Pi as part of `os/` already)
+   does both idempotently:
+   ```
+   sudo sh ~/dspunit-deploy/os/merge-boot-config.sh
+   sudo reboot
+   ```
+3. **Verify the RT kernel actually took**, per `os/VERIFY.md`: `uname -r`/`uname -v` show
+   the RT kernel, `/proc/cmdline` contains `isolcpus=3 nohz_full=3 rcu_nocbs=3`,
+   `CONFIG_PREEMPT_RT=y` in `/boot/config-$(uname -r)` — not `/sys/kernel/realtime`, that
+   file doesn't exist on this kernel build (see `os/VERIFY.md` for why).
+4. **Run `os/rt-tune.sh`** (needs the UMC202HD attached — it sanity-checks for an
+   `xhci-hcd` IRQ):
+   ```
+   sudo sh ~/dspunit-deploy/os/rt-tune.sh
+   ```
+   Run it twice and confirm identical output (idempotency), then confirm the xHCI IRQs
+   actually moved: `cat /proc/irq/<irq>/smp_affinity_list` should read `0-1`.
+5. **Verify the RT isolation holds under load** before trusting it:
+   ```
+   sudo apt install -y rt-tests stress-ng
+   sudo taskset -c 0-2 stress-ng --cpu 3 --timeout 90s &
+   sudo cyclictest -a 3 -p 90 -i 200 -D 60 -q
+   ```
+   Start both lines back-to-back so the cyclictest window is fully covered by load. Target:
+   worst-case `Max` well under 100 µs (measured ~5 µs on 2026-10-29).
+6. **`os/nftables.conf` — do not enable until both placeholders are real:**
+   - `UI_PORT`: not decided yet — `ui/` (Hazel's) hasn't picked a listen port. Sync with
+     her before enabling.
+   - `LAN_SUBNET`: currently set broad (all RFC1918 ranges) because the unit is still
+     moving between development networks with a different subnet each time. **Once the
+     final deploy/demo location is fixed**, narrow this to that location's real subnet:
+     ```
+     ip -4 addr show      # read the actual CIDR off the LAN-facing interface
+     ```
+     and replace the broad range in `os/nftables.conf` with that one real value — don't
+     ship the demo on the development-wide version, it's looser than the design calls for.
+   - Only once both are real: `sudo cp ~/dspunit-deploy/os/nftables.conf /etc/nftables.conf`
+     then `sudo systemctl enable --now nftables`, and verify with `nft list ruleset` plus
+     the LAN/off-LAN/outbound checks in `os/VERIFY.md`. **Keep a console session open while
+     testing** — a bad rule can lock out the only SSH path.

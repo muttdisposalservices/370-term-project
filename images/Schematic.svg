@@ -98,8 +98,8 @@
   <text x="452" y="606" class="note">No GPIO XSMT pin: audiod mutes by writing silence</text>
   <text x="452" y="623" class="note">to the ALSA buffer instead (software mute).</text>
   <text x="452" y="644" class="note">Linux: one-time "clock source N is not valid" dmesg</text>
-  <text x="452" y="661" class="note">line at probe. Fixed upstream ~5.19; §2's 6.12+ RT kernel</text>
-  <text x="452" y="678" class="note">postdates it, so this is effectively closed, not an open risk.</text>
+  <text x="452" y="661" class="note">line at probe. CONFIRMED closed on real hardware (2026-10-29):</text>
+  <text x="452" y="678" class="note">forced fresh USB probe, message never appears (not inferred).</text>
 
   <!-- ================= LEVELS ================= -->
   <rect x="20" y="620" width="400" height="110" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2" rx="6"/>

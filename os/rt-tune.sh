@@ -12,7 +12,7 @@ die() { log "ERROR: $*"; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "must run as root"
 
-XHCI_IRQS=$(awk -F: '/xhci_hcd/ {gsub(/^[ \t]+/,"",$1); print $1}' /proc/interrupts)
+XHCI_IRQS=$(awk -F: '/xhci[-_]hcd/ {gsub(/^[ \t]+/,"",$1); print $1}' /proc/interrupts)
 [ -n "$XHCI_IRQS" ] || die "no xhci_hcd IRQ found in /proc/interrupts -- is the UMC202HD attached?"
 
 set_affinity() {

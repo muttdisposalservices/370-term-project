@@ -1,7 +1,18 @@
 # os/config.txt -- fragment for /boot/firmware/config.txt
 # No dtoverlay needed: UMC202HD is USB class-compliant (snd-usb-audio),
 # not I2S/device-tree (rework.md §1 -- dts/ was dropped with the old
-# custom-board design). Nothing else added yet: no hardware evidence
-# exists for any onboard-audio or USB-power setting (Components.md:37
-# flags USB bus-power as unverified). Add lines here only once real
-# dmesg/hardware evidence justifies them (CLAUDE.md).
+# custom-board design).
+#
+# [pi5] kernel= line below: real hardware evidence justifies this
+# (os/VERIFY.md, 2026-10-29). The Pi 5 firmware defaults to booting
+# kernel_2712.img and won't pick up the apt-installed linux-image-rpi-v8-rt
+# package on its own. Merged into the live config.txt's existing [pi5]
+# section by os/merge-boot-config.sh, which reads this file rather than
+# hardcoding the value.
+#
+# Nothing else added: no hardware evidence exists for any onboard-audio or
+# USB-power setting (Components.md:37 flags USB bus-power as unverified).
+# Add lines here only once real dmesg/hardware evidence justifies them
+# (CLAUDE.md).
+[pi5]
+kernel=kernel8_rt.img

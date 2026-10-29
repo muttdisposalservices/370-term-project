@@ -258,8 +258,12 @@ deploy: check-pi cross
 	@echo "  sudo cp $(DEPLOY_STAGING)/os/nftables.conf /etc/nftables.conf"
 	@echo "  sudo systemctl enable --now nftables"
 	@echo ""
-	@echo "  # TODO: cmdline.txt/config.txt -> /boot/firmware/ merge is manual-only,"
-	@echo "  # not scripted here yet (single-line/no-duplicate concerns); see os/VERIFY.md"
+	@echo "  # cmdline.txt/isolcpus and config.txt/kernel= -> /boot/firmware/: deploy is"
+	@echo "  # copy-only and never edits the Pi's live boot config itself, so run this by"
+	@echo "  # hand. It's idempotent (checks before writing, won't duplicate entries on a"
+	@echo "  # repeat run) -- see os/merge-boot-config.sh for what it does and why."
+	@echo "  sudo sh $(DEPLOY_STAGING)/os/merge-boot-config.sh"
+	@echo "  sudo reboot"
 
 # --- Cleanup ---
 clean:

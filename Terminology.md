@@ -19,6 +19,7 @@ cmdline.txt / config.txt fragments: the Pi's boot files. cmdline.txt holds kerne
 nftables.conf: firewall rules. This is how you enforce "LAN only, no outbound".
 sshd_config.d/: drop-in files that harden SSH without editing the main config.
 rt-tune.sh: the real-time tuning script. It sets IRQ affinity, the CPU governor and similar settings.
+merge-boot-config.sh: applies the cmdline.txt/config.txt fragments above into the live /boot/firmware/ files on the Pi, idempotently (safe to re-run, won't duplicate entries). `make deploy` only copies files to the Pi -- this script is the manual step that actually changes the Pi's boot config.
 kernel/ (fallback build notes only): no kernel source lives here. These are just notes on building a PREEMPT_RT kernel yourself in case the packaged one doesn't work. PREEMPT_RT is the Linux build option that makes the kernel preemptible enough for hard real-time scheduling.
 systemd/
 unit files: systemd's service definitions (.service).
