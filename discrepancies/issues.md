@@ -212,13 +212,11 @@ the other side reviews.
   removed both.
 - **[Aaron]** CtldOutline.md §2 still lists "fold ctld into the UI" as open. That was
   settled by B12 (resolved_issues.md).
-- **[Hazel]** Terminology.md:31 has the same stale fold-in note.
 - **[Aaron]** ProposedStructure.md:67 says "~0.67 ms period", which should now be 0.5 ms.
   It's in the §2 RT-kernel/cyclictest bullet, which is os/ work.
-- **[Hazel]** ProposedStructure.md:197 still names `nrpacks` as the period constraint
-  (part of audiod's period config), but C3 says it was removed in Linux 3.13. The real
-  limit is snd-usb-audio's minimum period (`snd_pcm_hw_params_get_period_size_min`).
-- **[Aaron]** rework.md §1 has the same `nrpacks` wording.
+- **[Aaron]** rework.md §1 (:20) still names `nrpacks` as the period constraint, but C3
+  says it was removed in Linux 3.13. The real limit is snd-usb-audio's minimum period
+  (`snd_pcm_hw_params_get_period_size_min`).
 - Several files cite "issues.md C2/C6/C7". Those entries now live in plan.md:
   - **[Aaron]** Makefile:257 (C7);
   - **[Aaron]** os/VERIFY.md:30, 33 (C6, C7);
@@ -234,7 +232,6 @@ the other side reviews.
   - systemd/: F7, F8, F9, the audiod.service half of C13, the rt-tune.service unit in
     F11, and the audiod/analyzerd codes in F10;
   - D2 and D4;
-  - the ProposedStructure.md:197 `nrpacks` fix and the Terminology.md:31 note;
   - the dsp-architecture.png re-export (plan.md).
 - **Aaron:**
   - the udev rule in C13, C17, F4, the rt-tune.sh part of F11, and F12;

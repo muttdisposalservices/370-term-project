@@ -12,6 +12,8 @@ History only. Nothing here needs action.
   issues.md.
 - **C9** was decided and implemented on 2026-10-29. Only Hazel's daemons use the ring, so
   nothing is left in issues.md.
+- **Hazel's stale-text items** (issues.md §7) were fixed on 2026-10-29. Aaron's stale-text
+  items are still tracked in issues.md.
 
 Line references (`:NN`, `dsp:NN`) point at the files as they were when each issue was
 written, so they no longer match the current files.
@@ -64,9 +66,9 @@ resolved.
 
 ## B. Cross-document contradictions. RESOLVED (0cc5520)
 
-(B12 is fixed in ProposedStructure.md and Terminology.md:6, but CtldOutline.md §2 and
-Terminology.md:31 still list the fold-in as open. That leftover is tracked in issues.md
-under "Stale text".)
+(B12 is fixed in ProposedStructure.md and Terminology.md:6 and :31, but CtldOutline.md §2
+still lists the fold-in as open. That leftover is tracked in issues.md under "Stale
+text".)
 
 7. **Mechanism tags: now only partly true.** rework.md:7 says the diagrams
    (Schematic.svg, dsp-architecture.svg) tag mechanisms B-F.
@@ -283,6 +285,23 @@ over the frame size). Tested in `tests/test_ring.c`, including the mid-push case
   read. The claim check discards those copies. TSan would flag it; `make` doesn't run TSan.
 
 ProposedStructure.md §3 (IPC, audiod → analyzerd) and §5 (restart policy) updated to match.
+
+## Stale text (Hazel's items). Fixed (2026-10-29)
+
+**Original text (issues.md §7):**
+- Terminology.md:31 has the same stale fold-in note (as CtldOutline.md §2; settled by
+  B12).
+- ProposedStructure.md:197 still names `nrpacks` as the period constraint (part of
+  audiod's period config), but C3 says it was removed in Linux 3.13. The real limit is
+  snd-usb-audio's minimum period (`snd_pcm_hw_params_get_period_size_min`).
+
+**Fixes:**
+- Terminology.md:31 now names only the seqlock as unclear, pointing at issues.md C10.
+- ProposedStructure.md's data-flow table (audiod RT loop row, now :203) verifies against
+  `snd_pcm_hw_params_get_period_size_min` (issues.md H1) instead of `nrpacks`.
+- The C9 comment references in `src/common/ring.h` and `tests/test_ring.c` now point at
+  resolved_issues.md, since C9 left issues.md. The `issues.md C8` references stay while
+  Aaron's C8 review is open.
 
 ## E. New: issues within images/dsp-architecture.svg. RESOLVED (0cc5520)
 

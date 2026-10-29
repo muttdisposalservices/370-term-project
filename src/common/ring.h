@@ -1,5 +1,5 @@
 /* Single-producer / single-consumer overwriting ring in shared memory
- * (issues.md C9). audiod writes interleaved (Source, System) frames every
+ * (resolved_issues.md C9). audiod writes interleaved (Source, System) frames every
  * period and never waits; analyzerd reads and drops frames when it falls
  * behind.
  *

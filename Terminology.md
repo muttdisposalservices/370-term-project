@@ -28,4 +28,4 @@ asan: a build with AddressSanitizer, which catches memory errors at runtime.
 memcheck: running under Valgrind's leak and invalid-access checker.
 soakcheck: a one-hour version of the 48-hour "soak" endurance run. Soaking means running continuously to catch leaks, drift and fd exhaustion.
 deploy: cross-builds, then copies binaries plus os/ and systemd/ to the Pi.
-Things to clean up: the seqlock and the "ctld or folded into UI" choice are the two places where a reader can't tell from the tree what you mean. Everything else is standard terminology.
+Things to clean up: the seqlock is the one place where a reader can't tell from the tree what you mean (see issues.md C10). Everything else is standard terminology.

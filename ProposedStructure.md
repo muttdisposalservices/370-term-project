@@ -200,7 +200,7 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 | Pi 5 → UMC202HD, playback (mono on L + R) | USB isochronous OUT, same rate as capture |
 | RP1 xHCI host ↔ ALSA mmap buffer ↔ audiod | rate set by ALSA period/buffer config (VERIFY round-trip via loopback) |
 | RP1 xHCI completion IRQ (cores 0-1, not core 3) → updates ALSA hw pointer (audiod polls it, never blocks) | rate set by period size (VERIFY in `/proc/interrupts`) |
-| audiod RT loop | target: 48 frames = 0.5 ms, 2000 periods/s (96 frames = 1 ms, 1000 periods/s fallback if snd-usb-audio rejects 48 -- VERIFY against its minimum period / `nrpacks`) |
+| audiod RT loop | target: 48 frames = 0.5 ms, 2000 periods/s (96 frames = 1 ms, 1000 periods/s fallback if snd-usb-audio rejects 48 -- VERIFY against its minimum period, `snd_pcm_hw_params_get_period_size_min`; issues.md H1) |
 | audiod → SPSC ring | 2000 pushes/s × 384 B = 768 KB/s |
 | ring → analyzerd | ≈ 11.7 analyses/s (hop 8192) |
 | analyzerd → coeff triple buffer | ≤ 1–2 publishes/s, 760 B each, gated |

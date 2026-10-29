@@ -1,4 +1,4 @@
-/* Overwriting SPSC ring (src/common/ring.c, issues.md C9). */
+/* Overwriting SPSC ring (src/common/ring.c, resolved_issues.md C9). */
 #define _DEFAULT_SOURCE
 
 #include "test.h"

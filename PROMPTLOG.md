@@ -30,3 +30,4 @@
 --a two-process test with 20,000 publishes over a shared mapping that checks no read is ever half-written.
 Pushing to repo.
 - Moved on to SPSC ring implementation to manage partial production/reading issues. Updated docs after other tests + ring stability test pass. Pushing to repo.
+- Pointed Claude to stale text entry of issues.md to prevent miscomm. Just edited ring details to let Aaron handle his own data.
