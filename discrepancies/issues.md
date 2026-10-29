@@ -9,10 +9,15 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
 **Recheck (2026-10-28, after images/dsp-architecture.svg/.png were restored):**
 - **No longer an issue:** the deleted-file part of B7. The restored images are identical to
   the committed versions.
-- **Unchanged:** ProposedStructure.md, rework.md, Components.md and images/Schematic.svg.
-  Every other issue below is still present.
 - **New evidence in dsp-architecture.svg:** the SVG adds support to A1, A4, B9, B11, B13,
   C3, C5 and C6 (cited inline as `dsp:`) and has some problems of its own (section E).
+
+**Second recheck (2026-10-28, direct file inspection):** the "Unchanged" call above was
+wrong. ProposedStructure.md, rework.md, Components.md and images/Schematic.svg had already
+been edited since this review was first written (outside of it -- likely part of commit
+46a9e1d "Fix rework"), resolving A6, all of B7, and B15 without this file being updated to
+match. C1-C7 and A-section items not called out as resolved below are still current, now
+cross-checked against the live files rather than assumed.
 
 ---
 
@@ -43,26 +48,30 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
    and dsp:288/292 notes "hardware changed".
 5. **The Context section is out of date** (ProposedStructure.md:4). It says there is "no
    code or Makefile yet", but a Makefile, src/, os/ and systemd/ now exist.
-6. **The Schematic "Levels" box is stale.**
-   - Schematic.svg:107-108 says "VERIFY exact headroom once the specific interface model
-     is chosen", but the model is already chosen.
-   - :106 still refers to the "custom-board plan".
-   - :126 says "USB Audio Interface" instead of naming the model.
+6. **The Schematic "Levels" box is stale. NO LONGER AN ISSUE (confirmed 2026-10-28).** The
+   file was edited since this entry was written (outside this discrepancy review -- likely
+   part of commit 46a9e1d "Fix rework"). Current Schematic.svg already names the model
+   ("Behringer UMC202HD," :127), has no "custom-board plan" language, and the Levels box
+   cites a specific preamp-spec VERIFY (:108), not a generic "once the model is chosen"
+   one. This review's own "Recheck" note at the top incorrectly listed Schematic.svg as
+   "Unchanged" -- it wasn't, for this item.
 
 ## B. Cross-document contradictions
 
-7. **Mechanism tags: now only partly true.** rework.md:7 says the diagrams
-   (Schematic.svg, dsp-architecture.svg) tag mechanisms B-F.
-   - dsp-architecture.svg is back and does tag B, C, D, E and F (dsp:56, 72, 75, 138, 188,
-     225).
-   - Schematic.svg still has no mechanism tags, so the claim holds for only one of the two
-     diagrams.
-8. **The image paths are wrong.**
-   - ProposedStructure.md:11 and rework.md:7,17 reference `Schematic.svg`. The file now
-     lives at `images/Schematic.svg`, and the old root copy is deleted but not yet
-     committed.
-   - rework.md:7,20 and Components.md:18 reference `dsp-architecture.svg` without the
-     `images/` prefix.
+7. **Mechanism tags: now only partly true. NO LONGER AN ISSUE (confirmed 2026-10-28,
+   resolved by narrowing rework.md's claim).** rework.md:7 already says only
+   dsp-architecture.svg carries tags ("images/dsp-architecture.svg tags B, C, E, F ...
+   images/Schematic.svg carries no mechanism tags -- it's the hardware/wiring diagram, not
+   the software one"), so the claim no longer covers both diagrams. Schematic.svg itself
+   needs no tags added. (Separately, dsp-architecture.svg tags D too, at dsp:72/225, which
+   rework.md:7's "4 of 6, A and D dropped" and rework.md:13 both dispute -- that mismatch
+   is tracked as E1, not this item.)
+8. **The image paths are wrong. NO LONGER AN ISSUE (confirmed 2026-10-28).** Checked every
+   cited location directly: ProposedStructure.md:12, rework.md:7/17/20, and
+   Components.md:20 all already use the `images/` prefix for both SVGs, and no root-level
+   `Schematic.svg` copy exists any more (only `images/Schematic.svg`). Like A6, this was
+   fixed outside this discrepancy review and the "Recheck" note's "Unchanged" call was
+   wrong for this item too.
 9. **The ring is called "no-drop", but it drops frames.** rework.md:12 and dsp:75 call
    mechanism F a "no-drop SPSC ring". ProposedStructure.md:90-91 says the *reader drops
    frames and counts them*, and dsp-architecture.svg says the same thing itself (dsp:124
@@ -93,11 +102,15 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
     them is acoustic", while :135 says it is "one total delay (audiod + converters + air)".
     The second is correct: the mic hears the *processed output*, so the measured lag
     includes the USB OUT path, the DAC and audiod buffering.
-15. **"Measurement mic" vs. dynamic mic.** rework.md:30 and Schematic.svg:39 say
-    "measurement mic", while §7.1, Schematic:40 and dsp:219 say dynamic with no phantom
-    power. This isn't strictly a contradiction, but the UMC202HD's +48V is *shared* across
-    both inputs (rework.md:18). Turning it on would also put phantom power on the desk line
-    in input 1, so the docs should say "48V OFF". None of the three docs does.
+15. **"Measurement mic" vs. dynamic mic. NO LONGER AN ISSUE (confirmed 2026-10-28).**
+    Schematic.svg:39 now says "Dynamic mic," not "measurement mic" -- the mic itself is
+    unambiguous everywhere. rework.md:30's "measurement mic" is now only a deliberate
+    contrast ("a dynamic mic... not a flat measurement mic"), not a claim about which one
+    this is. The "48V OFF" ask is also done: Components.md:13 states "+48V: OFF" with the
+    full shared-phantom-power rationale, and both SVGs (Schematic.svg:42,
+    dsp-architecture.svg:217) now show it too. ProposedStructure.md §7.1 still only says
+    "no phantom power" without the literal "+48V: OFF" phrase, which is redundant given
+    Components.md already carries the explicit note -- not worth a separate fix.
 
 ## C. Undefined behaviour / underspecified mechanisms
 
@@ -243,9 +256,9 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
 
 ## D. Minor
 
-- **Text overlap in the schematic.** Schematic.svg:81 places the "TRS->XLR adapter cables"
-  text at y=460, which is the bottom edge of both output boxes (400+60). The text overlaps
-  the box borders.
+- **Text overlap in the schematic. FIXED (2026-10-28).** The "TRS->XLR adapter cables"/
+  "-> PA / speakers" lines moved from y=460/478 (the former sat on the output boxes'
+  bottom border, 400+60) to y=478/496.
 - **The watchdog doesn't cover exit codes.** ProposedStructure.md:63 says it "covers …
   clean exit codes", but exit codes come from the error-handling policy in §5.
 - **The audio path works without the mic.** rework.md:30 says "nothing here works if either
@@ -290,11 +303,12 @@ docs can be fixed. Items marked **VERIFY** need a check on the hardware.
   - bring §4's latency formula in line with dsp:45;
   - add the USB quirk note;
   - settle memfd → shm_open and drop the "folded into UI" option (after DECIDE).
-- **rework.md:** fix both image paths, reword the "no-drop" claim for F, correct the :20
-  rate-cascade claim, and either tag Schematic.svg or narrow :7 to dsp-architecture.svg.
-- **Components.md:18:** add the `images/` prefix.
-- **images/Schematic.svg:** update the Levels box and the :126 label, add "48V OFF", and
-  fix the :81 text overlap.
+- **rework.md:** image paths and the mechanism-tag claim (B7) already fixed; still reword
+  the "no-drop" claim for F and correct the :20 rate-cascade claim.
+- **Components.md:** path already fixed, nothing outstanding here.
+- **images/Schematic.svg:** Levels box, model naming, "48V OFF", the text overlap, and B7
+  (no tags needed, rework.md's claim was narrowed instead) are all already fixed. Nothing
+  outstanding in this file.
 - **images/dsp-architecture.svg:**
   - fix the :172-173 wake rate, the :194 memfd label, the :249 legend, :279 "48/96",
     :284 "§7.4" and the "no-drop" wording at :75;
