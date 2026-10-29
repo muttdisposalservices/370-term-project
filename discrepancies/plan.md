@@ -95,9 +95,18 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   - A fresh shm slot is never used as a default, because `tbuf_init` zeroes slots.
   - A block replaces the defaults only after `tbuf_consumer_poll` returns 1 and the block
     validates (finite, stable biquads; finite ceiling ≤ 0 dBFS).
+    - Added 2026-10-29: a coeff block is also rejected if any band has b0 = b1 = b2 = 0.
+      An all-zero slot is finite and stable, so without this rule it would pass. A band
+      that outputs silence is never a real EQ band.
+  - The limiter has instant attack (no lookahead) and a fixed 50 ms exponential release
+    (`LIMITER_RELEASE_MS`, 2026-10-29). Release can move into the param block later, once
+    that layout is defined.
   - Unmute (MUTED → FADING_IN → LIVE, linear ramp over `FADE_IN_MS`) needs all of:
     - both PCMs locked (C4);
     - `SELFCHECK_MS` of clean periods (no xrun, finite samples, DC under bound);
+      - The DC test is |mean| over the whole `SELFCHECK_MS` window, under
+        `DC_BOUND` = 0.01 (−40 dBFS) (2026-10-29). A single 0.5 ms period is too short,
+        since bass content looks like DC over one period.
     - one valid ctld param block since this audiod started.
   - An xrun or a non-finite output sample re-mutes.
 - **Build:**
@@ -193,15 +202,16 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   - The conversion is picked once per lock. The RT loop switches on the format once per
     period, with the per-sample loop inside each case. It never switches per sample.
   - Capture: int → float64 for the biquads. The raw L/R is cast to float32 for the ring.
-  - Playback: float64 → int with rounding and clamping. A NaN becomes 0, and that period
-    also trips the C11 non-finite re-mute.
-- **Build:** the conversions as pure functions in src/common/.
-- **Tests (shared):**
+  - Playback: float64 → int with rounding (to nearest, ties to even) and clamping. Any
+    non-finite sample becomes 0, ±Inf as well as NaN (2026-10-29), so a rail value never
+    reaches the drivers. That period also trips the C11 non-finite re-mute.
+- **Build:** done (`src/common/pcmfmt.h`, `src/common/pcmfmt.c`).
+- **Tests (shared):** done (`tests/test_pcmfmt.c`). They cover:
   - 24-bit sign extension;
   - S24_3LE byte packing;
   - full-scale scaling (2^-23 and 2^-31);
   - round and clamp at both rails;
-  - NaN → 0.
+  - NaN and ±Inf → 0.
 - **Outstanding:** which format the UMC202HD actually negotiates
   (`/proc/asound/card*/stream0`, issues.md C16: Aaron). That only decides which path runs
   on the unit.
