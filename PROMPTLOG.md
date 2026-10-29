@@ -19,3 +19,5 @@
 
 ## 10/28 [Hazel]
 - Came back to figure out what changed after Aaron redirected the project to using an external audio interface. Pointed Claude at the repo to analyze for discrepancies between multiple design documents. Put discovered problems in discrepancies/issues.md.
+- (Later) Pushed Claude to look through the current version of issues.md for anything preventing work on audiod/analyzerd/systemd. Updated issues.md to reflect Aaron's recent resolutions. Created new resolved_issues.md and plan.md files to track problem fixes, current problems, and active decisions. Added tags to each task for myself and Aaron's sakes.
+- 

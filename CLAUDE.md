@@ -21,6 +21,7 @@ logged. The 48-hour soak is the test suite of last resort.
 -- analyzerd: analysis and computation daemon
 -- ui: ungraded but very necessary UI
 -- tools: ungraded Python assists
+-- systemd: system controls
 - Aaron:
 -- Hardware: Prototyping and constructing unit
 -- Makefile: nested here to be able to test 'make deploy' on LAN
