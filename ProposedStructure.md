@@ -162,7 +162,9 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 | **ctld** | C17, `src/ctl/` | SCHED_OTHER, cores 0-1 | Control plane on a Unix domain socket: presets, limits, bypass, meters. It translates UI requests into parameter writes and is the only producer of the param block. It samples the status block at 20 Hz and serves meters to the ui. Always a separate daemon from the UI: the UI is Python and never maps shm, ctld is the sole producer of the shm param block, and CLAUDE.md keeps graded mechanisms out of Python. |
 | **ui** | Python, `ui/` | cores 0-1 | LAN web interface. It talks only to ctld's socket and never maps shm. It pushes meters to the browser over a WebSocket at 20 Hz. **No graded mechanism lives here.** |
 
-### IPC (all in shared memory via `shm_open`, mapped once at start)
+### IPC (all in shared memory via `shm_open`)
+audiod creates all four segments; analyzerd and ctld only attach, and attach again by name
+if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
 - **audiod → analyzerd:** a lock-free SPSC ring of interleaved (Source, System) float32
   frames, 2^17 frames long (1 MiB, ≈ 1.37 s: one FFT window plus the 100 ms delay search
   plus analyzer jitter). audiod pushes 48 frames (384 B) per period at 2000 periods/s,
@@ -302,17 +304,33 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 - **Restart policy:** errors fall into two classes.
   - *Recoverable* errors are handled in-process and only counted: xrun, a dropped ring
     frame, a rejected estimate.
-  - *Unrecoverable* errors (device lost, repeated recovery failures, corrupt shm) go
-    through this sequence: log, mute, goto-cleanup, exit with a distinct nonzero code.
-    systemd then restarts the daemon (`Restart=on-failure`, short `RestartSec`).
-    `StartLimitBurst` stops restart storms, and `RestartPreventExitStatus` covers config
-    errors, where restarting won't help. A process that hangs misses its watchdog ping and
-    gets killed and restarted the same way.
-- The shm segments (`/dev/shm`) outlive any one process, so a restarted audiod reattaches
-  and checks the segment's magic/version. It then resumes on the last-good coefficients
-  instead of coming back flat. (`tbuf_init` zeroes the slots, so today this holds only
-  through analyzerd's republish above; see issues.md C12.) A generation counter in the ring header tells analyzerd that
-  audiod restarted (`ring_read` returns `-ESTALE`), so it resets its delay estimate.
+  - *Unrecoverable* errors (device lost, repeated recovery failures) go through this
+    sequence: log, mute, goto-cleanup, exit with a distinct nonzero code. systemd then
+    restarts the daemon (`Restart=on-failure`, short `RestartSec`). `StartLimitBurst`
+    stops restart storms, and `RestartPreventExitStatus` covers config errors, where
+    restarting won't help. A process that hangs misses its watchdog ping and gets killed
+    and restarted the same way.
+  - Corrupt shm is *not* unrecoverable: a restart would find the same segment, so audiod
+    repairs it instead (below). The one shm config error is a segment audiod can't
+    unlink (`-EACCES`/`-EPERM`).
+- **Segment lifecycle (resolved_issues.md C12).** The shm segments (`/dev/shm`) outlive
+  any one process and are never unlinked on exit.
+  - *audiod creates and repairs.* On every start, `shm_seg_create` maps each segment at
+    its exact size. A segment of the wrong size or type, or one audiod can't open
+    read-write, is unlinked and recreated. A bad header in a usable segment is
+    re-initialised by `ring_init`/`tbuf_init`/`seqlock_init`. audiod never exits over
+    segment contents.
+  - *One generation per audiod start*, shared by all four segments: the previous gen
+    (read from the old status block) + 1, or a clock seed if that header was bad.
+    Readers see `-ESTALE` (the ring's tells analyzerd to reset its delay estimate).
+  - *analyzerd and ctld only attach.* They never exit over shm state: they retry until
+    audiod has made a segment, reattach on `-ESTALE`, and after a stall check
+    `shm_seg_replaced` and attach by name again if audiod recreated the segment.
+  - *Coefficients after an audiod restart* come back only through analyzerd's republish
+    above; the EQ is flat until then. `tbuf_init` zeroes the slots, so nothing left in
+    shm by a crashed audiod is trusted.
+  - *Units:* analyzerd.service and ctld.service are `After=`/`Wants=audiod.service`,
+    never `BindsTo=`/`Requires=`, so they survive an audiod restart.
 
 ## 6. Proposed repo layout
 ```

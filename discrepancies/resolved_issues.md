@@ -16,6 +16,8 @@ History only. Nothing here needs action.
   issues.md.
 - **C11** was decided on 2026-10-29. The decision is restated as a plan entry in
   [plan.md](plan.md), and Aaron's ctld-side review is tracked in issues.md.
+- **C12** was decided and implemented on 2026-10-29. It also decided F8, which is restated
+  in plan.md. Aaron's ctld-side review is tracked in issues.md.
 - **Hazel's stale-text items** (issues.md §7) were fixed on 2026-10-29. Aaron's stale-text
   items are still tracked in issues.md.
 
@@ -360,6 +362,76 @@ response. So a fresh slot can never be used as a default.
   re-arms the gate, and analyzerd's restores the last accepted coefficients.
 
 ProposedStructure.md §3 (IPC) and §5 updated to match. Work items are in plan.md C11.
+
+## C12. Decided and implemented (2026-10-29)
+
+**Original text (issues.md §1):** Corrupt shm leads to a crash loop. audiod creates and
+recreates the segments; Aaron owns ctld's reattach. "Corrupt shm" is classed as
+unrecoverable, so audiod exits and restarts (:159-161). The restarted audiod reattaches to
+the same segment (:165) and fails again, until `StartLimitBurst` leaves it dead. Nothing
+says who recreates a bad segment. **PROPOSED:**
+- audiod creates all four segments.
+- On a bad magic/version, audiod unlinks and recreates them (it doesn't exit) and bumps
+  the generation counter.
+- analyzerd and ctld only attach, and they reattach when the generation changes.
+
+This also decides unit ordering (F8).
+
+Related (from C11): ProposedStructure.md §5 says a restarted audiod "resumes on the
+last-good coefficients" from shm, but `tbuf_init` zeroes the slots. Today that holds only
+because analyzerd republishes on `-ESTALE`.
+
+**What was already covered.** `ring_init` and `seqlock_init` re-init a segment with a bad
+header in place, and `tbuf_init` always does (C8-C10). So a bad magic/version alone can't
+loop once audiod has a correctly sized mapping. What was missing was the segment itself:
+- no code opened, sized or named the segments;
+- some states can't be fixed in place (wrong size, not a regular file, a file audiod can't
+  open read-write);
+- nothing said where `gen` comes from.
+
+**Why the proposal wasn't enough.** Unlink-and-recreate makes a new object. A reader
+still mapping the old one never sees a gen change, so it stalls for good.
+
+**Decision:** the proposal, with the repair split by what's broken. Implemented in
+`src/common/shm.{h,c}` and tested in `tests/test_shm.c`, including two regression tests
+for the crash loop: a corrupt header and a wrong-size segment, each across repeated
+restarts.
+- **audiod is the only creator.** `shm_seg_create` maps each segment at exactly its
+  expected size:
+  - right size: kept, and a bad header is re-initialised by the primitive's init;
+  - wrong size, not a regular file, or can't be opened RW: unlinked and recreated (mode
+    set with `fchmod`, so umask can't narrow it). Old mappings stay valid, so no reader
+    can take SIGBUS.
+
+  audiod never exits over segment contents. The one shm exit is an unusable segment that
+  audiod can't unlink (`-EACCES`/`-EPERM`, e.g. another user's file in sticky
+  `/dev/shm`). That's a config error with its own exit code in `RestartPreventExitStatus`
+  (F10), so systemd stops on a clear log line instead of looping.
+- **Segment names:** `/dspunit-ring`, `/dspunit-coeff`, `/dspunit-param` and
+  `/dspunit-status`. They are never unlinked on exit.
+- **Generation.** One gen per audiod start, shared by all four inits. audiod reads the
+  previous gen from the old status block with `seqlock_reader_attach`. The new gen is
+  `shm_next_gen(have_prev, prev, seed)`: `prev + 1`, or a CLOCK_MONOTONIC seed if the old
+  status header was bad or new. It's masked to tbuf's 24 bits. Every reader holds `prev`
+  or older, so it always sees a change; the exceptions are a 2^24 wrap and a seed
+  collision after a corrupt header.
+- **analyzerd and ctld only attach** (`shm_seg_attach`, read-only for the ring and
+  status readers):
+  - they never create a segment and never exit over shm state;
+  - they send `READY=1`, then retry attach every 100 ms while sending `WATCHDOG=1`.
+    `-ENOENT`, `-EPROTO` and `-EAGAIN` all mean audiod hasn't (re)made the segment yet;
+  - on `-ESTALE` they reattach the primitive on the same mapping and republish (C11);
+  - after `SHM_STALL_MS` (proposed 1 s) without progress, they call `shm_seg_replaced`
+    at most once a second. If the name now points at a new object, they close and
+    attach by name again.
+- **Coefficients after an audiod restart** come only from analyzerd's republish.
+  `tbuf_init` keeps zeroing slots, so audiod never trusts slot contents left behind by a
+  crash. The EQ stays flat until analyzerd republishes.
+- **Unit ordering (F8):** analyzerd.service and ctld.service get `After=` and
+  `Wants=audiod.service`, never `BindsTo=`/`Requires=`. Restated in plan.md.
+
+ProposedStructure.md §3 (IPC) and §5 updated to match. CtldOutline.md §9 is Aaron's and
+still says "corrupt shm → exit"; that is tracked in issues.md.
 
 ## Stale text (Hazel's items). Fixed (2026-10-29)
 

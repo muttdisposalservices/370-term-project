@@ -26,6 +26,8 @@ Legend:
 - **SOFT:** work can start, but this must be decided before the component is done.
 - **PROPOSED:** a recommendation only. It isn't decided.
 
+F8 was decided by C12 and is now in plan.md.
+
 IDs are kept from the earlier version (C8-C17, D1-D4, F1-F12; F3 became H1-H4) so
 references elsewhere still work. `:NN` references are to ProposedStructure.md unless
 another file is named. They were written against earlier versions of the files, so they
@@ -67,21 +69,21 @@ the other side reviews.
   - serving `mute_state`/`mute_reason` from the status block in its meters/status reply.
 
   CtldOutline.md should say all three.
-- **[Hazel]** **C12. Corrupt shm leads to a crash loop.** audiod creates and recreates the
-  segments; Aaron owns ctld's reattach. "Corrupt shm" is classed as unrecoverable, so
-  audiod exits and restarts (:159-161). The restarted audiod reattaches to the same
-  segment (:165) and fails again, until `StartLimitBurst` leaves it dead. Nothing says
-  who recreates a bad segment. **PROPOSED:**
-  - audiod creates all four segments.
-  - On a bad magic/version, audiod unlinks and recreates them (it doesn't exit) and bumps
-    the generation counter.
-  - analyzerd and ctld only attach, and they reattach when the generation changes.
+- **[Aaron]** **C12. Review the segment lifecycle from the ctld side.** It's decided and
+  implemented (see [resolved_issues.md](resolved_issues.md) C12). audiod is the only
+  creator; ctld and analyzerd only attach. Review `src/common/shm.h` and the shared
+  `tests/test_shm.c`, and confirm ctld can live with:
+  - attaching with `shm_seg_attach` (read-only for status, RW for the param block), and
+    never creating a segment;
+  - never exiting over shm state: send `READY=1`, then retry attach every 100 ms while
+    sending `WATCHDOG=1` (`-ENOENT`, `-EPROTO` and `-EAGAIN` mean audiod hasn't made the
+    segment yet);
+  - after `SHM_STALL_MS` (proposed 1 s) of a stalled heartbeat or persistent `-EAGAIN`,
+    calling `shm_seg_replaced` at most once a second, and attaching by name again if it
+    returns 1.
 
-  This also decides unit ordering (F8).
-
-  Related (from C11): ProposedStructure.md §5 says a restarted audiod "resumes on the
-  last-good coefficients" from shm, but `tbuf_init` zeroes the slots. Today that holds
-  only because analyzerd republishes on `-ESTALE`.
+  CtldOutline.md §9 still lists "corrupt shm" as an unrecoverable exit and should say the
+  above instead.
 
 ## 2. audiod
 
@@ -194,12 +196,6 @@ the other side reviews.
 
 - **[Hazel]** **F7. systemd/ ownership isn't recorded. SOFT.** Hazel took systemd/ on
   2026-10-28, but CLAUDE.md's Ownership list doesn't include it yet. Add it there.
-- **[Hazel]** **F8. Unit ordering depends on C12. HARD.**
-  - If audiod creates the segments, analyzerd.service and ctld.service get
-    `After=`/`Wants=audiod.service`.
-  - They must not get `BindsTo=` or `Requires=`: §5 needs them to survive an audiod
-    restart through the generation counter.
-  - Device ordering for audiod itself is C13.
 - **[Hazel]** **F9. The service user and permissions are undefined. HARD.** The unit
   files are Hazel's; creating the user on the Pi is os/ work, so Aaron's. Do the daemons
   run as root or as a dedicated user? If not root:
@@ -210,7 +206,8 @@ the other side reviews.
 - **[Hazel + Aaron]** **F10. There's no exit-code table. SOFT.** Hazel lists the codes for
   audiod and analyzerd and puts them in the units' `RestartPreventExitStatus`. Aaron
   lists the codes for ctld. §5 asks for "a distinct nonzero code" per unrecoverable
-  error, and `RestartPreventExitStatus` needs a list of codes. Neither exists.
+  error, and `RestartPreventExitStatus` needs a list of codes. Neither exists. audiod's
+  list must include the shm config error from C12 (a segment it can't unlink).
 - **[Aaron]** **[HW CHECK] F11. rt-tune.service can block audiod over a log line. SOFT.**
   - `os/rt-tune.sh` `die`s if `/xhci_hcd/` matches nothing in /proc/interrupts. Since
     C6, that match only feeds a log message.
@@ -275,10 +272,10 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - C12 and C15;
+  - C15;
   - the code side of C14, C16 and F1;
   - F2, F5 and F6;
-  - systemd/: F7, F8, F9, the audiod.service half of C13, the rt-tune.service unit in
+  - systemd/: F7, F9, the audiod.service half of C13, the rt-tune.service unit in
     F11, and the audiod/analyzerd codes in F10;
   - D2 and D4;
   - the dsp-architecture.png re-export (plan.md).

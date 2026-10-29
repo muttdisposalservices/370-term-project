@@ -1,9 +1,9 @@
-# Plan: decided design changes (2026-10-28; C11 added 2026-10-29)
+# Plan: decided design changes (2026-10-28; C11 and F8 added 2026-10-29)
 
 These are the decisions that came out of the docs review. Each one is already written into
 ProposedStructure.md (and the SVGs where noted). This file turns them into work: what to
 build, which component it touches, and what's still outstanding. Entries keep their
-original IDs (C1-C7, C11), because other files refer to them, e.g. `os/rt-tune.sh` and
+original IDs (C1-C7, C11, F8), because other files refer to them, e.g. `os/rt-tune.sh` and
 `os/VERIFY.md` cite "issues.md C6/C7". The original issue text is in
 [resolved_issues.md](resolved_issues.md). Open questions and hardware checks stay in
 [issues.md](issues.md).
@@ -116,8 +116,14 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   - `SELFCHECK_MS` (proposed 250 ms) against the settle time from H3 (Aaron).
   - Aaron's ctld review (issues.md C11): ctld republishes its full param state on every
     `-ESTALE` reattach, and the output stays muted while ctld is down.
-  - The "last-good coefficients after an audiod restart" claim depends on analyzerd's
-    republish until C12 is decided.
+
+### F8. Unit ordering (decided by C12). Component: systemd. Owner: Hazel
+- **Decided** (resolved_issues.md C12): audiod is the only shm creator, so
+  `analyzerd.service` and `ctld.service` get `After=audiod.service` and
+  `Wants=audiod.service`. Never `BindsTo=` or `Requires=`: both must survive an audiod
+  restart by reattaching (§5). Device ordering for audiod itself is issues.md C13.
+- **Build:** those two lines, when the unit files are written (with F9).
+- **Outstanding:** none beyond F9.
 
 ## Leftover actions from these decisions
 - **Hazel:** re-export `images/dsp-architecture.png` from the SVG after the C1, C5 and C6
@@ -133,7 +139,8 @@ These parts depend only on decided items. All of them are Hazel's. Tests are sha
   - the watchdog/log thread;
   - a passthrough loop that writes silence on teardown;
   - biquads and the limiter, in src/common with unit tests;
-  - the startup defaults, block validation and mute gate (C11).
+  - the startup defaults, block validation and mute gate (C11);
+  - segment create/repair and the start gen (C12, `src/common/shm.h`).
 - **analyzerd:** GCC-PHAT delay estimation, H(f) smoothing and the EQ solver, as pure
   functions in analysis/*.c files other than main.c, tested on synthetic WAVs. This works
   until main.c lands (issues.md F4).
