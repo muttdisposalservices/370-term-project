@@ -1,317 +1,273 @@
-verify # Docs review: ProposedStructure.md, rework.md, images/Schematic.svg (2026-10-28)
+# Open issues (condensed 2026-10-28)
 
-The design moved from a custom I2S ADC/DAC board (PCM1808/PCM5102A/THAT/osc) to a Behringer
-UMC202HD over USB. This review lists sections of the three docs (and Components.md where
-they point to it) that still describe the old hardware, claims that contradict each other,
-and behaviour nothing defines. Items marked **DECIDE** need a design decision before the
-docs can be fixed. Items marked **VERIFY** need a check on the hardware.
+This file lists only the issues that still need addressing. Related files:
+- [resolved_issues.md](resolved_issues.md): sections A, B and E, which are fixed, and the
+  original text of C1-C7, which are decided.
+- [plan.md](plan.md): the C1-C7 decisions, written as work items.
 
-**Recheck (2026-10-28, after images/dsp-architecture.svg/.png were restored):**
-- **No longer an issue:** the deleted-file part of B7. The restored images are identical to
-  the committed versions.
-- **New evidence in dsp-architecture.svg:** the SVG adds support to A1, A4, B9, B11, B13,
-  C3, C5 and C6 (cited inline as `dsp:`) and has some problems of its own (section E).
+Legend:
+- **Owner tags** follow CLAUDE.md's Ownership section:
+  - **[Hazel]** owns audiod, analyzerd, ui, tools and systemd/.
+  - **[Aaron]** owns the hardware, the Makefile, ctld and os/.
+  - **[Hazel; HW: Aaron]**: Hazel owns the code or decision; Aaron does the check on the
+    unit.
+  - Doc owners (set 2026-10-28):
+    - rework.md is Aaron's.
+    - Terminology.md and images/dsp-architecture.svg/.png are Hazel's, though both have
+      been edited jointly.
+    - images/Schematic.svg is the hardware wiring diagram, so Aaron's.
+    - Items in ProposedStructure.md are assigned by the component they describe.
+- **[HW CHECK]:** the item is neither decided nor addressed, and settling it depends on a
+  check on the real Pi 5 + UMC202HD. Paste the evidence (dmesg, /proc output, a capture)
+  under the item, per CLAUDE.md.
+- **HARD:** code can't be written correctly, or can't pass `make test`/`make asan`, until
+  this is decided.
+- **SOFT:** work can start, but this must be decided before the component is done.
+- **PROPOSED:** a recommendation only. It isn't decided.
 
-**Second recheck (2026-10-28, direct file inspection):** the "Unchanged" call above was
-wrong. ProposedStructure.md, rework.md, Components.md and images/Schematic.svg had already
-been edited since this review was first written (outside of it -- likely part of commit
-46a9e1d "Fix rework"), resolving A6, all of B7, and B15 without this file being updated to
-match. C1-C7 and A-section items not called out as resolved below are still current, now
-cross-checked against the live files rather than assumed.
+F8 was decided by C12 and is now in plan.md. C15, F2, F5, F6, F7 and D2 were settled
+on 2026-10-29 and have left this file. Hazel's sides of C13, C14, C16, F1, F9, F10 (audiod, analyzerd) and F11 were
+decided the same day and are in plan.md; only the remaining parts are listed below.
 
----
-
-## A. Stale content from the removed I2S board (definite inconsistencies)
-
-1. **The data-flow rate table still describes the I2S hardware**
-   (ProposedStructure.md:111-115). It has rows for the 24.576 MHz osc → PCM1808/PCM5102A,
-   BCK/LRCK, RP1 I2S DIN/DOUT, RP1 DMA, and "DMA-completion IRQ ~1500/s per stream".
-   - None of these parts exist any more (§1, §7.2, Components.md, Schematic "What this
-     replaces" box).
-   - With USB, xHCI interrupts happen per URB completion, not per ALSA period, so the
-     1500/s figure is also wrong.
-   - dsp-architecture.svg's rate table (dsp:270-292) has already been rewritten for USB,
-     so the two tables now disagree.
-   - The same I2S-era figure survives on the diagram itself: dsp:172-173 labels the wake
-     arrow "~3000/s, 1500 / stream". The SVG's own table row (dsp:291) says "rate set by
-     period size; VERIFY".
-2. **The XSMT GPIO is still listed** (ProposedStructure.md:125, "audiod non-RT thread →
-   journald, XSMT GPIO"). This contradicts §5 (:147, "no GPIO mute pin exists"),
-   Schematic.svg:67/97, and dsp:68/343.
-3. **The `dts/` directory and device-tree install are still listed.**
-   ProposedStructure.md:172 says the Makefile "installs … dts/", and :179 describes a
-   "device-tree overlay for the I2S card". This contradicts §1 (:29, "no device-tree
-   overlay, no I2S"), :54-55, dsp:190 and dsp:226. No `dts/` directory exists in the repo.
-4. **The rate cascade did change** (rework.md:20). It claims "no rate-cascade numbers needed
-   to change", but the cascade in ProposedStructure §3 is the I2S clock tree that no longer
-   applies (see A1). dsp-architecture.svg confirms this: its table was rewritten for USB,
-   and dsp:288/292 notes "hardware changed".
-5. **The Context section is out of date** (ProposedStructure.md:4). It says there is "no
-   code or Makefile yet", but a Makefile, src/, os/ and systemd/ now exist.
-6. **The Schematic "Levels" box is stale. NO LONGER AN ISSUE (confirmed 2026-10-28).** The
-   file was edited since this entry was written (outside this discrepancy review -- likely
-   part of commit 46a9e1d "Fix rework"). Current Schematic.svg already names the model
-   ("Behringer UMC202HD," :127), has no "custom-board plan" language, and the Levels box
-   cites a specific preamp-spec VERIFY (:108), not a generic "once the model is chosen"
-   one. This review's own "Recheck" note at the top incorrectly listed Schematic.svg as
-   "Unchanged" -- it wasn't, for this item.
-
-## B. Cross-document contradictions
-
-7. **Mechanism tags: now only partly true. NO LONGER AN ISSUE (confirmed 2026-10-28,
-   resolved by narrowing rework.md's claim).** rework.md:7 already says only
-   dsp-architecture.svg carries tags ("images/dsp-architecture.svg tags B, C, E, F ...
-   images/Schematic.svg carries no mechanism tags -- it's the hardware/wiring diagram, not
-   the software one"), so the claim no longer covers both diagrams. Schematic.svg itself
-   needs no tags added. (Separately, dsp-architecture.svg tags D too, at dsp:72/225, which
-   rework.md:7's "4 of 6, A and D dropped" and rework.md:13 both dispute -- that mismatch
-   is tracked as E1, not this item.)
-8. **The image paths are wrong. NO LONGER AN ISSUE (confirmed 2026-10-28).** Checked every
-   cited location directly: ProposedStructure.md:12, rework.md:7/17/20, and
-   Components.md:20 all already use the `images/` prefix for both SVGs, and no root-level
-   `Schematic.svg` copy exists any more (only `images/Schematic.svg`). Like A6, this was
-   fixed outside this discrepancy review and the "Recheck" note's "Unchanged" call was
-   wrong for this item too.
-9. **The ring is called "no-drop", but it drops frames.** rework.md:12 and dsp:75 call
-   mechanism F a "no-drop SPSC ring". ProposedStructure.md:90-91 says the *reader drops
-   frames and counts them*, and dsp-architecture.svg says the same thing itself (dsp:124
-   "drops + counts if late", dsp:303). The no-drop guarantee applies to the audio path,
-   not the ring. As written, F is claimed for a property the ring doesn't have.
-10. **The USB quirk was never added to ProposedStructure.md.** rework.md:22 says the "clock
-    source N is not valid" quirk is "carried into ProposedStructure.md". Both SVGs carry
-    it (Schematic.svg:99-100, dsp:227-228), but ProposedStructure.md never mentions it.
-    The fix landed around kernel 5.19, and §2 requires a 6.12+ RT kernel, so this VERIFY
-    can mostly be closed.
-11. **memfd vs. persistent `/dev/shm`.** ProposedStructure.md:86 and dsp:194 allow `memfd`
-    *or* `shm_open`. §5 (:165-167) and dsp:73 ("survives restarts") rely on segments
-    outliving a process so a restarted audiod can reattach. A memfd is freed when its
-    last fd closes, so only `shm_open` works. **DECIDE:** use shm_open only.
-12. **The option to fold ctld "into the UI backend"** (ProposedStructure.md:83) conflicts
-    with other rules.
-    - The UI is Python, and :84 says the UI "never maps shm".
-    - ctld is the only producer of the param block, which lives in shm.
-    - CLAUDE.md allows no graded mechanism in Python and makes ctld C17 and Aaron's.
-
-    The fold-in option breaks all three. dsp-architecture.svg (dsp:114-118) already shows
-    ctld only as a separate C17 daemon.
-13. **The two statements about syscalls in the RT loop disagree.** :66-67 says the RT loop
-    "makes no syscalls", while :81 and dsp:63 say "no blocking syscalls". The ALSA mmap
-    loop has to make syscalls (`snd_pcm_mmap_begin/commit`, status ioctls, and some kind
-    of wait). :66-67 is the outlier (see C1).
-14. **What the measured delay includes is stated two ways.** :22-23 says "any delay between
-    them is acoustic", while :135 says it is "one total delay (audiod + converters + air)".
-    The second is correct: the mic hears the *processed output*, so the measured lag
-    includes the USB OUT path, the DAC and audiod buffering.
-15. **"Measurement mic" vs. dynamic mic. NO LONGER AN ISSUE (confirmed 2026-10-28).**
-    Schematic.svg:39 now says "Dynamic mic," not "measurement mic" -- the mic itself is
-    unambiguous everywhere. rework.md:30's "measurement mic" is now only a deliberate
-    contrast ("a dynamic mic... not a flat measurement mic"), not a claim about which one
-    this is. The "48V OFF" ask is also done: Components.md:13 states "+48V: OFF" with the
-    full shared-phantom-power rationale, and both SVGs (Schematic.svg:42,
-    dsp-architecture.svg:217) now show it too. ProposedStructure.md §7.1 still only says
-    "no phantom power" without the literal "+48V: OFF" phrase, which is redundant given
-    Components.md already carries the explicit note -- not worth a separate fix.
-
-## C. Undefined behaviour / underspecified mechanisms
-
-1. **How the RT loop is paced (affects mechanism B). DECIDED (2026-10-28): polling.**
-   audiod busy-polls the ALSA mmap hw pointer each period instead of blocking in
-   `poll`/`snd_pcm_wait`. Core 3 is isolated for audiod alone, so blocking buys nothing (no
-   other work could use the freed CPU), while polling skips the scheduler wakeup
-   round-trip and needs no syscall per check. The xHCI completion IRQ (cores 0-1, not
-   core 3 -- see C6) still runs on every USB completion; it just updates the hw pointer,
-   rather than waking a sleeper, so it doesn't need to share a core with the thread it
-   updates. Fixed in ProposedStructure.md §2/§3, rework.md:9, and dsp-architecture.svg
-   (wake-arrow label + rate-table row). The .png re-export is still outstanding.
-2. **A 64-frame period doesn't line up with USB microframes. DECIDED (2026-10-28): target
-   48 frames, fall back to 96.** At 96 kHz a high-speed microframe carries 12 frames, and
-   64/12 = 5.33, so period-elapsed lands mid-packet and wakeups jitter by up to a URB. 48
-   frames (4 microframes, 0.5 ms, 2000 periods/s) lines up exactly and keeps audiod's own
-   buffering contribution to latency lowest, which matters given PROBLEM.md names latency
-   as the project's central risk. 96 frames (8 microframes, 1 ms, 1000 periods/s) is the
-   documented fallback if `snd-usb-audio`'s minimum period / `nrpacks` rejects 48 --
-   **VERIFY** on hardware either way. Fixed in ProposedStructure.md (§1, §3 IPC text,
-   §3 data-flow table, §4) and rework.md:20; dsp-architecture.svg's subtitle, per-period
-   label, wake-arrow rate, IPC-arrow labels and rate-table rows updated to 48/2000 with 96
-   noted as fallback.
-3. **The latency budget in ProposedStructure.md leaves out USB (§4). DECIDED (2026-10-28):
-   fixed with a cited planning range, not a guess.**
-   - "ADC + period×periods + DAC" ignored the isochronous URB queue and the interface's
-     internal buffering. dsp:45 already said "output latency = audiod loop + USB
-     isochronous buffering (VERIFY via loopback)", so the two docs disagreed.
-   - A web search for real UMC202HD measurements (no official Behringer round-trip spec
-     exists) found: a Linux/JACK test (44.1 kHz, 64-frame × 2 periods) reporting
-     output-only latency of 6.3-7.7 ms ([forum.modartt.com](https://forum.modartt.com/viewtopic.php?id=8026)),
-     and a Windows test reporting ~8 ms total processing latency, where a *smaller* buffer
-     made it worse (8 ms → 12 ms) ([JamKazam](https://jamkazam.freshdesk.com/support/solutions/articles/66000122529)).
-     `nrpacks`, the obvious kernel-side knob, was removed in Linux 3.13 and no longer
-     applies, so there's no current tunable to derive a number from either.
-   - ProposedStructure.md §1 and §4 now state **≈6-8 ms total output-path latency** as an
-     explicitly unverified planning range sourced from other OS/driver/buffer configs, not
-     ours, with the DAC→ADC loopback test in Verification as the only way to get a real
-     number for this hardware/kernel. No separate ADC/USB/DAC sub-split is claimed, since
-     the measurements don't decompose that way.
-4. **Capture/playback linkage is unspecified. DECIDED (2026-10-28).** snd-usb-audio exposes
-   capture and playback as separate PCMs, and the UMC202HD uses implicit feedback
-   (playback timing is slaved to capture).
-   - **Start order is forced, not chosen:** by USB Audio Class 2.0's definition of
-     implicit feedback, playback's OUT rate is derived from capture's IN packet pattern,
-     so capture must be prepared and started first, and must run long enough to establish
-     a stable pattern before playback starts. `snd_pcm_link()`'s simultaneous-trigger
-     semantics don't fit this sequencing and aren't used.
-   - **xrun recovery is coupled:** any xrun in either direction -- not just a capture
-     xrun, which obviously breaks playback's clock reference -- stops and relocks *both*
-     streams through the same start sequence. A playback-only xrun is deliberately not
-     recovered independently, trading a few extra ms of silence on a playback blip for
-     one restart code path instead of relying on unverified independent-recovery
-     behavior from snd-usb-audio. The settle time between starting capture and starting
-     playback is still a hardware VERIFY.
-   - Fixed in ProposedStructure.md §1 (new "Capture/playback linkage" bullet) and §5
-     (xrun bullet rewritten for the coupled restart).
-5. **Unit-level scheduling settings reach the non-RT threads. DECIDED (2026-10-28): don't
-   set them at the unit level for audiod at all.** `audiod.service` previously set
-   `CPUSchedulingPolicy=fifo`/`CPUAffinity=` process-wide; since systemd has no syntax to
-   target one thread of a multi-threaded process, every subsequently `pthread_create`'d
-   thread would inherit that as its default, so audiod's non-RT watchdog/logging thread
-   would silently run as FIFO 80 on the isolated core 3 unless it remembered to demote
-   itself -- the dangerous state as the default. Instead, audiod's unit now sets only
-   `LimitMEMLOCK=infinity`; the RT thread calls `pthread_setschedparam(SCHED_FIFO, 80)` +
-   `pthread_setaffinity_np()` (core 3) on itself right after it starts -- unconditionally,
-   every time audiod starts, before it ever touches the ALSA mmap loop -- and the non-RT
-   thread is left alone at `SCHED_OTHER`/default affinity. `isolcpus=3` already keeps an
-   unaffined thread off core 3, so nothing needs to actively demote itself, and any future
-   thread is safe by default. Fixed in ProposedStructure.md §2/§3 and
-   dsp-architecture.svg's audiod box (process label, RT-thread label, non-RT-thread
-   label). The .png re-export is still outstanding.
-6. **An IRQ is pinned to the "audio-only" core. DECIDED (2026-10-28): pin none there.**
-   :52 reserved core 3 for the audio thread, but :53 and dsp:189 pinned the xHCI
-   completion IRQ there on the theory it needed to be near the RT thread it updates. It
-   doesn't: audiod polls the mmap hw pointer in memory (mechanism B) rather than blocking
-   on the IRQ, and a hardirq's memory write is visible across cores via cache coherence
-   well within a period. Co-locating it would instead have been a jitter source in its
-   own right -- a hardirq preempts even `SCHED_FIFO`, and this one fires every 0.5 ms (one
-   per USB completion), directly against "core 3 belongs to the audio thread only." It
-   also would have required pinning one device's endpoints independently of the rest of
-   the shared RP1 xHCI controller's IRQ, which isn't possible. The xHCI completion IRQ now
-   gets no special case: it moves to cores 0-1 with every other IRQ. Whether RP1's
-   PCIe-MSI IRQs accept an affinity change at all stays a **VERIFY**, but it's the same
-   VERIFY that already covered "every other IRQ," not a new one. Fixed in
-   ProposedStructure.md §2, the §3 data-flow table, and the Verification section, and in
-   dsp-architecture.svg's xHCI kernel-layer cell, rate-table row, and kernel-space banner.
-   `os/VERIFY.md`'s checklist (the CPU3-only assertion and the endpoint-specific-pin item)
-   was also stale from before this fix and is now updated. The .png re-export is still
-   outstanding.
-7. **apt vs. the firewall. DECIDED (2026-10-28): apt runs once at bring-up, before the
-   firewall is ever loaded; `make deploy` never installs packages.** The graded
-   "no network calls" rule (CLAUDE.md) is about the running product, not the one-time
-   provisioning step that puts an OS and RT kernel on the SD card before the product
-   exists, and sequencing is forced by the Makefile itself: `make deploy` is copy-only
-   (`Makefile:230-260`) and its printed install steps never touch apt, so the RT kernel
-   has to already be on the Pi before `nftables` enters the picture. Order: flash →
-   boot on an open network → `apt update && apt install` the RT kernel + `apt-mark hold`
-   (one-time) → `make deploy` → enable `os/nftables.conf`. A later kernel-package swap
-   repeats that bootstrap with the firewall not yet (re-)enabled. Fixed in
-   ProposedStructure.md §2 (networking bullet) and `os/VERIFY.md` (new checklist item).
-8. **The triple-buffer release protocol is unspecified. DEFERRED (2026-10-28) -- revisit
-   later.** :96-99 says analyzerd "fills the free slot", but not how it knows which slot is
-   free.
-   - Knowing requires audiod to *publish* which slot it holds. That is a write, and the
-     text only describes audiod doing loads (also dsp:93, 314).
-   - During a ramp audiod holds two slots. A second publish within one period (e.g.
-     right after an audiod restart) would find no free slot.
-
-   The exchange/ack mechanism needs to be specified.
-9. **Ring overwrite detection is unspecified.** For the reader to "drop frames" (:90), it
-   has to detect that the writer lapped it *while* it was copying (a torn read). src/common
-   includes a seqlock (:173), but nothing says whether or how the ring uses it.
-10. **Status block consistency is unspecified.** audiod writes the block 1500 times/s and
-    ctld reads it at 20 Hz from another process (:105-106, dsp:99, 132). No tearing
-    protection is stated.
-11. **Startup defaults are undefined.** Nothing says how audiod behaves before any
-    coefficients exist (fresh shm) or before ctld has published params (limiter
-    threshold, bypass state). audiod boots first, so this window always occurs.
-12. **Corrupt shm leads to a crash loop.** "Corrupt shm" is classed as unrecoverable, so
-    audiod exits and restarts (:159-161). The restarted audiod reattaches to the same
-    segment (:165) and fails again, until `StartLimitBurst` leaves it dead. Nothing says
-    who recreates a bad segment.
-13. **A missing or lost device leaves audio down for good.** Nothing orders audiod after the
-    ALSA card exists. If the UMC202HD is late or unplugged, audiod reports "device lost"
-    and restarts repeatedly until `StartLimitBurst` stops it. Audio then stays down with
-    no recovery path. dsp:275 mentions hotplug, but no doc says what happens then.
-14. **Muting on crash and on stream stop is undefined.** §5 covers a clean exit and calls
-    out a hang. Still undefined:
-    - A SIGSEGV or a watchdog SIGKILL also skips the silence write.
-    - What the UMC202HD outputs when the USB OUT stream stops: silence, or a pop.
-    - What the ALSA `sw_params` (`stop_threshold`) do on underrun. With the defaults the
-      stream stops on underrun, so the "hang" gap is actually short. Set these on purpose.
-15. **Sample-rate negotiation has no failure rule.** The rate is "negotiated … target
-    96 kHz" (:27, dsp:45). If hw_params returns a different rate, every constant shifts:
-    period length in ms, FFT window, ring length in seconds, and biquad design. Should a
-    mismatch be a config error (`RestartPreventExitStatus`)? Undefined. See also E3.
-16. **The sample-format conversion point isn't specified.** UMC202HD capture is likely
-    S24_3LE or S32_LE, while the ring holds float32 and the biquads use float64.
-17. **The preamp gain range is unconfirmed.** §7.1 and dsp:219 need 50-60 dB of gain.
-    **VERIFY** against the UMC202HD spec, since the top of that range may exceed what the
-    MIDAS preamp can give.
-
-## D. Minor
-
-- **Text overlap in the schematic. FIXED (2026-10-28).** The "TRS->XLR adapter cables"/
-  "-> PA / speakers" lines moved from y=460/478 (the former sat on the output boxes'
-  bottom border, 400+60) to y=478/496.
-- **The watchdog doesn't cover exit codes.** ProposedStructure.md:63 says it "covers …
-  clean exit codes", but exit codes come from the error-handling policy in §5.
-- **The audio path works without the mic.** rework.md:30 says "nothing here works if either
-  sensor is missing data". Without the mic, only the analyzer freezes (§4 gate).
-- **The dsp-architecture subtitle probably runs off the canvas.** dsp:45 is about 348
-  characters at 12.5 px starting at x=30, roughly 2,100 px wide on a 1,700 px canvas.
-  **VERIFY** in a browser.
-
-## E. New: issues within images/dsp-architecture.svg
-
-1. **Mechanism D is still claimed.** dsp:72 ("shared memory (D)") and dsp:225 ("mechanisms
-   we use: B, C, D, E, F") claim D for `/dev/shm`. rework.md:13 says that shm is tmpfs,
-   has no power-cut story, and that D should be treated as unclaimed. The diagram and the
-   rework notes disagree about the mechanism count.
-2. **The legend says agreed values are missing from ProposedStructure.md, but they are
-   there.**
-   - dsp:249 says teal = "value agreed in the rate review (not yet in
-     ProposedStructure.md)". ProposedStructure.md already contains every teal value:
-     - 19 × ⅓-oct float64 biquads (:81, :92);
-     - FFT 32768 / hop 8192 (:82);
-     - 2¹⁷-frame ring (:88);
-     - 20 Hz meters (:83-84);
-     - WatchdogSec=10 / 5 s (:61-62);
-     - the ctld param triple buffer (:100-104).
-   - dsp:312 says the param buffer "fixes the two-writer gap in §3", but §3 already
-     includes that fix.
-3. **The capture rate is given as "48/96 kHz"** (dsp:279). 48 kHz appears nowhere else.
-   Every other doc and the rest of the SVG (dsp:45, 59, 252) target 96 kHz.
-4. **There is no §7.4.** dsp:284 cites "§7.4" for the mono-on-L+R decision, but
-   ProposedStructure.md §7 has only items 1-3. The decision is §7.3.
+IDs are kept from the earlier version (C8-C17, D1-D4, F1-F12; F3 became H1-H4) so
+references elsewhere still work. `:NN` references are to ProposedStructure.md unless
+another file is named. They were written against earlier versions of the files, so they
+may have drifted.
 
 ---
 
-## Suggested fixes (doc-only, not yet applied)
+## 1. The shared shm contract (HARD, blocks audiod, analyzerd and ctld)
 
-- **ProposedStructure.md:**
-  - replace the §3 rate-table rows 111-115 and row 125 with the USB rows already in
-    dsp:270-292;
-  - remove `dts/` from §6;
-  - fix the §1 image path and update the Context section;
-  - reword :22-23 and :66;
-  - bring §4's latency formula in line with dsp:45;
-  - add the USB quirk note;
-  - settle memfd → shm_open and drop the "folded into UI" option (after DECIDE).
-- **rework.md:** image paths and the mechanism-tag claim (B7) already fixed; still reword
-  the "no-drop" claim for F and correct the :20 rate-cascade claim.
-- **Components.md:** path already fixed, nothing outstanding here.
-- **images/Schematic.svg:** Levels box, model naming, "48V OFF", the text overlap, and B7
-  (no tags needed, rework.md's claim was narrowed instead) are all already fixed. Nothing
-  outstanding in this file.
-- **images/dsp-architecture.svg:**
-  - fix the :172-173 wake rate, the :194 memfd label, the :249 legend, :279 "48/96",
-    :284 "§7.4" and the "no-drop" wording at :75;
-  - resolve the D tag at :72/:225 together with rework.md:13;
-  - re-export the .png after any edit.
-- **C-items:** those marked DECIDE/VERIFY stay open questions until they are resolved.
+Nothing defines the byte layout, magic/version or creator of any of the four segments
+(ring, coeff block, param block, status block). CtldOutline.md §5 says this has to be
+settled jointly. Each item below is owned by the side that writes or creates the segment;
+the other side reviews.
+
+- **[Aaron]** **C8. Review the triple buffer for the ctld param block.** It's decided and
+  implemented (see [resolved_issues.md](resolved_issues.md) C8). From the ctld side:
+  - Review `src/common/tbuf.h` and the shared `tests/test_tbuf.c`.
+  - Confirm ctld can live with the producer contract:
+    - retry `tbuf_producer_attach` on `-EAGAIN`;
+    - reattach on `-ESTALE` from `tbuf_publish`;
+    - give the param block a fixed `slot_size`.
+- **[Aaron]** **C10. Review the seqlock for the status block.** It's decided and
+  implemented (see [resolved_issues.md](resolved_issues.md) C10). From the ctld side:
+  - Review `src/common/seqlock.h` and the shared `tests/test_seqlock.c`.
+  - Confirm ctld can live with the reader contract:
+    - on `-EAGAIN` from `seqlock_read`, skip that 20 Hz tick;
+    - on `-ESTALE` (audiod restarted), reset any deltas and read again;
+    - treat a persistent `-EAGAIN` or a stalled heartbeat as audiod down.
+  - soakcheck reads status through ctld's socket, not shm, so ctld's "query current
+    meters/status" request has to serve it. CtldOutline.md and the Makefile's soakcheck
+    comment ("a status-block reader") should say so.
+- **[Aaron]** **C11. Review the startup mute gate from the ctld side.** It's decided (see
+  [resolved_issues.md](resolved_issues.md) C11 and plan.md C11). audiod stays muted until
+  ctld has published one valid param block since audiod started. Confirm ctld can live
+  with:
+  - republishing its full param state after every `-ESTALE` reattach, not only on change,
+    since that is what unmutes a restarted audiod;
+  - the output staying muted while ctld is down;
+  - serving `mute_state`/`mute_reason` from the status block in its meters/status reply.
+
+  CtldOutline.md should say all three.
+- **[Aaron]** **C12. Review the segment lifecycle from the ctld side.** It's decided and
+  implemented (see [resolved_issues.md](resolved_issues.md) C12). audiod is the only
+  creator; ctld and analyzerd only attach. Review `src/common/shm.h` and the shared
+  `tests/test_shm.c`, and confirm ctld can live with:
+  - attaching with `shm_seg_attach` (read-only for status, RW for the param block), and
+    never creating a segment;
+  - never exiting over shm state: send `READY=1`, then retry attach every 100 ms while
+    sending `WATCHDOG=1` (`-ENOENT`, `-EPROTO` and `-EAGAIN` mean audiod hasn't made the
+    segment yet);
+  - after `SHM_STALL_MS` (proposed 1 s) of a stalled heartbeat or persistent `-EAGAIN`,
+    calling `shm_seg_replaced` at most once a second, and attaching by name again if it
+    returns 1.
+
+  CtldOutline.md §9 still lists "corrupt shm" as an unrecoverable exit and should say the
+  above instead.
+
+## 2. audiod
+
+- **[Aaron]** **C13. The udev rule for the UMC202HD.** Hazel's half is decided (plan.md
+  C13): audiod.service is `BindsTo=`, `After=` and `WantedBy=dev-umc202hd.device`. Still
+  needed from os/:
+  - A udev rule that matches the ALSA **card** device (`SUBSYSTEM=="sound"`,
+    `KERNEL=="card*"`) on the UMC202HD's USB IDs (from `lsusb` on the Pi). It sets
+    `TAG+="systemd"` and a `SYSTEMD_ALIAS` of `/dev/umc202hd`.
+    - Match the card, not the USB device, so the device unit goes active only once the
+      PCMs exist.
+    - No `SYSTEMD_WANTS` is needed, because of the `WantedBy=`.
+  - **[HW CHECK]** Once audiod runs, unplug the UMC202HD and paste the journal. It should
+    show whether a restart after exit 10 is dropped (the bound device is inactive), and
+    that the restart doesn't count toward `StartLimitBurst`.
+- **[Aaron]** **[HW CHECK] C14. Does the UMC202HD pop when its OUT stream stops?** The
+  code side is decided (plan.md C14):
+  - `stop_threshold` = buffer size, set explicitly;
+  - `start_threshold` = boundary;
+  - a watchdog-thread stall exit.
+
+  Record the analog output (scope, or a recording on another device) while an
+  `aplay -D hw:<card>` of silence is stopped, once with Ctrl-C and once with `kill -9`.
+  If it pops, Hazel switches playback to free-running silence fill (plan.md C14).
+- **[Aaron]** **[HW CHECK] C16. Which sample format does the UMC202HD negotiate?** The
+  code side is decided (plan.md C16): S32_LE, S24_3LE or S24_LE, with the conversion
+  picked once per lock. Paste `/proc/asound/card*/stream0` from the Pi, for both capture
+  and playback.
+- **[Aaron]** **[HW CHECK] F1. Is each hw-pointer check a syscall on arm64?** The code
+  side is decided (plan.md F1): the poll is time-gated, so the loop is correct either way.
+  - As far as I know, the kernel allows mmap of the PCM status/control pages only on
+    x86/PPC/Alpha. On arm64, alsa-lib falls back to the `SNDRV_PCM_IOCTL_SYNC_PTR`
+    ioctl, which takes the PCM stream lock that the xHCI IRQ thread also takes.
+  - Check with `strace -c -f arecord -M -D hw:<card> ...` on the Pi (`-M` is mmap mode),
+    or in the Pi kernel's `sound/core/pcm_native.c`, and paste the result.
+  - The result tunes the 50 µs margin and the wording of C1's "no syscall per check"
+    rationale (ProposedStructure.md §2, rework.md's B entry).
+- **[Aaron]** **[HW CHECK] H1. Is a 48-frame period accepted?** Left over from decision C2
+  (plan.md; Hazel owns the code). Check that snd-usb-audio accepts 48 frames at 96 kHz
+  (`snd_pcm_hw_params_get_period_size_min`). If it doesn't, the 96-frame fallback
+  applies.
+- **[Aaron]** **[HW CHECK] H2. What is the real output-path latency?** Left over from
+  decision C3 (plan.md). Do the DAC→ADC loopback impulse measurement to replace the
+  ≈6-8 ms planning range.
+- **[Aaron]** **[HW CHECK] H3. How long should capture run before playback starts?** Left
+  over from decision C4 (plan.md; Hazel owns the code). Measure the settle time from
+  capture start to playback start that implicit feedback needs.
+- **[Aaron]** **F13. Every build is unoptimised (`-O0`). SOFT.** (Makefile; it affects
+  audiod's RT loop, which is Hazel's.)
+  - `CFLAGS` (Makefile:31) has `-g` but no `-O` level, so native, cross and asan builds
+    all compile at GCC's default, `-O0`.
+  - audiod's RT loop runs every 0.5 ms on core 3: 19 float64 biquads, the limiter, a ring
+    push and the status seqlock write. At `-O0` nothing is inlined or vectorised, and
+    locals are spilled to the stack. That spends period budget the design doesn't account
+    for, and it can cause soak xruns that come from the build, not the design.
+  - Some `-Werror` warnings (e.g. `-Wmaybe-uninitialized`) only fire with optimisation
+    on. Code that passes now may stop building once `-O` is added, so it's cheaper to
+    switch early.
+  - **PROPOSED:** add `-O2` to `CFLAGS` (keep `-g`), so tests run the same code generation
+    the Pi does. No `-ffast-math`, because the biquads and limiter depend on IEEE
+    behaviour. After the change, Hazel re-runs `make test`, `make asan` and
+    `make memcheck`.
+- **[Aaron; loop side: Hazel]** **[HW CHECK] F14. RT throttling vs. a busy-polling RT
+  thread. SOFT.** (New 2026-10-29.)
+  - audiod's RT thread spins at SCHED_FIFO 80 on core 3 and never sleeps (C1, F1).
+  - RT throttling (`kernel.sched_rt_runtime_us`, default 950000 of every 1000000 µs) caps
+    RT tasks at 95% of each second. The thread could then be held off for up to 50 ms,
+    about 100 periods, which is a guaranteed xrun.
+  - On 6.12+ kernels, the fair-server deadline server may instead run starved CFS tasks
+    (per-CPU kworkers) on core 3. That's shorter, but it still preempts the loop.
+  - `cyclictest` sleeps between samples, so the planned isolation check can't see this.
+  - Check on the Pi and paste:
+    - `uname -r` and `cat /proc/sys/kernel/sched_rt_runtime_us`;
+    - a minimal busy loop under `chrt -f 80 taskset -c 3`, logging any gap over 100 µs
+      for a few minutes.
+  - Then decide between two fixes:
+    - os/ sets `kernel.sched_rt_runtime_us=-1` (Aaron). That removes the safety net for
+      a runaway RT thread, but only on isolated core 3.
+    - The loop yields briefly each period (Hazel).
+
+## 3. analyzerd
+
+- **[Aaron]** **F4. The Makefile's test link breaks as soon as analyzerd has a `main.c`.
+  HARD.** (Makefile; it blocks Hazel's analyzerd tests.)
+  - `TESTABLE_SRCS` (Makefile:57) pulls in all of `analysis/*.c`, `main.c` included. This
+    contradicts the Makefile's own header comment ("never a daemon's own main.c").
+  - Test binaries link only `-lm` (Makefile:140, 165). A second `main()`, or any
+    `sd_notify` call, breaks `make test` and `make asan`.
+  - ProposedStructure.md:269 puts the "sd_notify wrapper" in `src/common/`, which every
+    test binary links, so it hits the same problem.
+  - Fix: `filter-out` the main.c, and keep sd_notify out of src/common (or give tests
+    `-lsystemd`).
+  - Related (new 2026-10-29, from F5): `src/common/fft.c` calls `cos`/`sin`, and every
+    src/common object is linked into every daemon. `LDLIBS_CTLD` (Makefile:37) has no
+    `-lm`, so ctld's link fails once `src/ctl/` has sources. Fix: add `-lm` to
+    `LDLIBS_CTLD`, or link src/common as a static archive so each daemon pulls in only
+    the objects it uses.
+
+## 4. systemd units
+
+- **[Aaron]** **F9. Create the `dspunit` service user. SOFT.** Decided (plan.md F9): all
+  three daemons run as one system user, `dspunit`, not root. The units add the groups and
+  limits.
+  - Create it in os/ as a *system* user (UID below 1000, no login shell), so logind's
+    `RemoveIPC` never deletes the segments. A `sysusers.d` fragment would keep it
+    versioned.
+  - **[HW CHECK]** Once audiod runs: if it exits 22 because `pthread_setschedparam` fails
+    with `EPERM` despite `LimitRTPRIO=80`, paste the kernel config's
+    `CONFIG_RT_GROUP_SCHED` line.
+- **[Aaron]** **F10. Exit codes for ctld. SOFT.** audiod's and analyzerd's tables are
+  decided (plan.md F10, ProposedStructure.md §5). The scheme is 1 internal, 10-19
+  restart, 20-29 config errors listed in `RestartPreventExitStatus`, and a code shared
+  between daemons means the same thing. Still needed, in the same scheme: ctld's codes.
+  - analyzerd exits 21 on `-EACCES`/`-EPERM` from `shm_seg_attach`: a permission error
+    is config, not shm state. ctld probably wants the same, which narrows the "never
+    exiting over shm state" bullet in C12 above.
+- **[Aaron]** **[HW CHECK] F11. rt-tune.service can block audiod over a log line. SOFT.**
+  - `os/rt-tune.sh` `die`s if `/xhci_hcd/` matches nothing in /proc/interrupts. Since
+    C6, that match only feeds a log message.
+  - If the RP1 controller's IRQ has a different name on the Pi 5 (possibly
+    `xhci-hcd:usbN`), rt-tune.service fails. Per OsOutline.md §8 that is meant to stop
+    audiod from starting.
+  - Needs a real /proc/interrupts paste before anyone changes it (CLAUDE.md evidence
+    rule).
+  - Separately, the script runs `systemctl disable --now irqbalance` from inside a boot
+    oneshot. Masking irqbalance once at deploy, plus `Conflicts=irqbalance.service` in
+    the unit (now decided, plan.md F11), avoids changing unit state during boot.
+  - The unit side is decided (plan.md F11). For now audiod `Wants=` rt-tune.service, and
+    it moves to `Requires=` once this script fails only on real tuning failures (IRQ
+    affinity, governor). So this fix is what lets audiod require tuning.
+- **[Aaron]** **F12. `make deploy` can't ship the daemons yet. SOFT.**
+  - There's no aarch64 sysroot for `-lasound`/`-lsystemd` (Makefile:27).
+  - Makefile:247 enables `ctld` and `rt-tune.service`, neither of which exists yet.
+  - Until the sysroot exists, build natively on the Pi.
+- **[Aaron]** **[HW CHECK] H4. Do RP1's PCIe-MSI IRQs accept an affinity change?** Left
+  over from decision C6 (plan.md). Paste `/proc/interrupts` under load showing the xHCI
+  count rising only on CPU0/1. If affinity can't be set, rt-tune.sh needs a fallback
+  (os/VERIFY.md).
+
+## 5. Hardware
+
+- **[Aaron]** **[HW CHECK] C17. The preamp gain range is unconfirmed.** §7.1 and dsp:219
+  need 50-60 dB of gain. Check against the UMC202HD spec and on the unit, since the top
+  of that range may exceed what the MIDAS preamp can give.
+
+## 6. Minor (doc fixes, re-checked 2026-10-28: all still present)
+
+- **[Aaron]** **D1. Text overlap in the schematic.** (Schematic.svg is the hardware wiring
+  diagram.) Schematic.svg:81 places the "TRS->XLR adapter cables" text at y=460, which is
+  the bottom edge of both output boxes (400+60). The text overlaps the box borders.
+- **[Aaron]** **D3. The audio path works without the mic.**
+  rework.md:30 says "nothing here works if either sensor is missing data". Without the
+  mic, only the analyzer freezes (§4 gate).
+
+## 7. Stale text that will mislead whoever implements this
+
+- **[Aaron]** OsOutline.md §4 says rt-tune.sh "pins the UMC202HD's xHCI IRQ(s) to core
+  3". §5 states an `IRQ_THREAD_PRIO=85` contract against audiod's unit priority. c882d91
+  removed both.
+- **[Aaron]** CtldOutline.md §2 still lists "fold ctld into the UI" as open. That was
+  settled by B12 (resolved_issues.md).
+- **[Aaron]** ProposedStructure.md:67 says "~0.67 ms period", which should now be 0.5 ms.
+  It's in the §2 RT-kernel/cyclictest bullet, which is os/ work.
+- **[Aaron]** rework.md §1 (:20) still names `nrpacks` as the period constraint, but C3
+  says it was removed in Linux 3.13. The real limit is snd-usb-audio's minimum period
+  (`snd_pcm_hw_params_get_period_size_min`).
+- Several files cite "issues.md C2/C6/C7". Those entries now live in plan.md:
+  - **[Aaron]** Makefile:257 (C7);
+  - **[Aaron]** os/VERIFY.md:30, 33 (C6, C7);
+  - **[Aaron]** os/rt-tune.sh:8, 31 (C6);
+  - **[Aaron]** rework.md:9, 20 (C6, C2).
+
+## 8. By owner
+
+- **Hazel:**
+  - the loop side of F14, once Aaron's check is in.
+- **Aaron:**
+  - the udev rule and unplug check in C13, C17, F4, the rt-tune.sh part of F11, F12 and
+    F13;
+  - H1, H2, H3 and H4;
+  - the hardware checks for C14, C16, F1 and F14 (and the os/ sysctl, if chosen);
+  - creating the service user and the EPERM check (F9), and the ctld codes in F10;
+  - D1 and D3;
+  - the stale text in OsOutline.md, CtldOutline.md, ProposedStructure.md:67, rework.md
+    (`nrpacks` wording and its C2/C6 references), the Makefile and os/;
+  - review of C8, C10, C11 and C12 from the ctld side.

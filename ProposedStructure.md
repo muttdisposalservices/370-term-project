@@ -45,6 +45,19 @@ Mic  ─► UMC202HD input 2 (combo XLR/TRS, MIDAS preamp) ┘                  
   a capture xrun destroys playback's clock reference outright, and a playback-only xrun
   is handled the same way for one code path, even though capture itself was unaffected
   (see §5).
+- **DECIDED (2026-10-29): negotiation and stream thresholds (plan.md C14-C16).**
+  - *Rate and period.* hw_params sets exactly 96 kHz (no resampling) and 48 frames, else
+    96, with a 2-period buffer. Capture and playback must agree on all three. Anything
+    else is a config error, exit 20 (§5).
+  - *Format.* S32_LE, S24_3LE or S24_LE, per PCM. Conversion is picked once per lock:
+    int → float64 for the biquads, float32 for the raw ring push, and float64 → int with
+    round and clamp (NaN → 0) for playback.
+  - *sw_params, set on purpose on both PCMs:*
+    - `stop_threshold` = buffer size, so a hung or dead audiod underruns and the stream
+      stops within about 1 ms;
+    - `start_threshold` = boundary, so the playback silence pre-fill can't autostart
+      playback before capture settles;
+    - `avail_min` = one period.
 - **Known quirk:** a one-time "clock source N is not valid" dmesg line at USB probe, tied to
   implicit-feedback-mode support on the UMC 202/204/404 HD series. Fixed upstream around
   kernel 5.19+ and reported harmless once that fix is present. Since §2 already requires a
@@ -98,11 +111,22 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   still fires on every USB completion -- it just updates the hw pointer that the spin
   loop reads, rather than waking a sleeping thread. Since audiod never waits on it, it
   doesn't need to share a core with the thread it updates.
+  - **DECIDED (2026-10-29): the poll is time-gated (plan.md F1).** The loop spins on
+    `clock_gettime(CLOCK_MONOTONIC)` (vDSO, no syscall) until about 50 µs before the
+    predicted boundary, re-anchored every period. Only then does it poll
+    `snd_pcm_avail_update()`, never `snd_pcm_avail()`. On arm64 the hw-pointer check may
+    be an ioctl that takes the stream lock (issues.md F1). If so, this keeps it to a few
+    calls per period.
 - systemd is the **supervisor**. Each daemon is `Type=notify` with `WatchdogSec=10` and
-  `Restart=on-failure`, and sends `WATCHDOG=1` every 5 s (half the interval). This covers
-  the CLAUDE.md requirement of a heartbeat within 60 s and clean exit codes. For
-  single-threaded daemons (analyzerd, ctld), scheduling setup goes in the unit files
-  (`CPUAffinity=`, `CPUSchedulingPolicy=fifo`, `CPUSchedulingPriority=`), not in code.
+  `Restart=on-failure`, and sends `WATCHDOG=1` every 5 s (half the interval). The
+  watchdog covers the CLAUDE.md heartbeat requirement and catches hangs. Clean exit codes
+  come from the §5 restart policy and its exit-code table, not from the watchdog. audiod
+  sends `READY=1` once its shm segments exist and both PCMs are locked, before unmute.
+  ctld is ordered after it and the unmute needs ctld, so waiting for unmute would
+  deadlock. `TimeoutStartSec=15s` (plan.md F2). For
+  single-threaded daemons (analyzerd, ctld), scheduling setup goes in the unit files,
+  not in code. Both stay `SCHED_OTHER` (no `CPUSchedulingPolicy=`), and analyzerd gets
+  `CPUAffinity=2` (plan.md F6).
   audiod's unit sets only `LimitMEMLOCK=infinity` (for `mlockall`) -- no
   `CPUAffinity=`/`CPUSchedulingPolicy=`, see below for why. Open every fd with
   `O_CLOEXEC` so restarts don't leave orphaned fds.
@@ -110,7 +134,9 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   the RT loop makes no blocking syscalls (it still makes non-blocking ones, e.g. the ALSA
   mmap ioctls). That thread sends `WATCHDOG=1` only if the status-block
   heartbeat counter has advanced since its last check, so a stuck RT loop still trips the
-  watchdog.
+  watchdog. If the heartbeat stalls for about 100 ms, the thread logs why and exits with
+  code 12 (§5), so systemd restarts audiod at once instead of after `WatchdogSec`. It
+  never calls alsa-lib on the RT thread's handles (plan.md C14).
   - **DECIDED (2026-10-28): audiod's RT thread pins itself in code; nothing demotes the
     non-RT thread.** A unit-file `CPUAffinity=`/`CPUSchedulingPolicy=fifo` would apply to
     the whole process at `exec`, and every subsequently `pthread_create`'d thread inherits
@@ -129,6 +155,17 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     own. If a third thread is ever added, it's safe by default without anyone having to
     remember to demote it. `mlockall()` is process-wide, so which thread calls it doesn't
     matter and stays unaffected by this split.
+- **DECIDED (2026-10-29): unit files (plan.md C13, F9, F11).**
+  - *User.* All three daemons run as one system user, `dspunit`, not root. A system UID
+    is never subject to logind's `RemoveIPC`, and `DynamicUser=` isn't used because it
+    implies `RemoveIPC=yes`. audiod adds `SupplementaryGroups=audio`, `LimitRTPRIO=80`
+    and `LimitMEMLOCK=infinity`. Segments are mode 0600. rt-tune.service stays root.
+  - *Device.* audiod is `BindsTo=`/`After=dev-umc202hd.device` and
+    `WantedBy=dev-umc202hd.device`, so an unplug stops it and a replug starts it again.
+    The device unit comes from a udev rule in os/ that tags the ALSA card.
+  - *Tuning.* audiod `Wants=`/`After=rt-tune.service` for now, so a spurious rt-tune
+    failure costs jitter, not all audio. It moves to `Requires=` once rt-tune.sh fails
+    only on real tuning failures.
 - No outbound networking (graded boundary, CLAUDE.md), **for the deployed product.**
   `os/nftables.conf` accepts inbound traffic only from the LAN subnet, and only to two
   ports: the UI port and SSH. SSH is there for `make deploy` and is key-only
@@ -158,32 +195,45 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 | Process | Lang / dir | Sched / core | Job |
 |---|---|---|---|
 | **audiod** | C17, `src/audio/` | RT thread: SCHED_FIFO 80, core 3 (self-pinned in code, §2); non-RT thread: SCHED_OTHER, cores 0-1 (default affinity, not pinned); `mlockall` (process-wide) | ALSA `hw:` mmap full-duplex loop, paced by polling the mmap hw pointer each period (mechanism B) rather than blocking in `poll()`/`snd_pcm_wait()`. Per period it reads L/R, applies the current EQ biquads (19 × 1/3-octave, float64) and dynamics (comp/gate/**limiter**) to Source, writes to the DAC, and pushes raw L/R into the analysis ring. No malloc, no syscalls that block, no logging in the loop. |
-| **analyzerd** | C17, `analysis/` | SCHED_OTHER (or FIFO 10), core 2 | Reads the ring and estimates the acoustic delay between Source and System (cross-correlation / GCC-PHAT). It then computes the smoothed transfer function H(f) = System/Source and derives *bounded* EQ corrections. These are published as a new coefficient set. Analysis uses a 32768-point FFT with a hop of 8192 (341 ms window, 2.9 Hz bins, ≈ 11.7 analyses/s). This is the graded "intelligence" and is all our code. |
+| **analyzerd** | C17, `analysis/` | SCHED_OTHER, core 2 (`CPUAffinity=2` in the unit, plan.md F6) | Reads the ring and estimates the acoustic delay between Source and System (cross-correlation / GCC-PHAT). It then computes the smoothed transfer function H(f) = System/Source and derives *bounded* EQ corrections. These are published as a new coefficient set. Analysis uses a 32768-point FFT (our own radix-2, `src/common/fft.c`, plan.md F5) with a hop of 8192 (341 ms window, 2.9 Hz bins, ≈ 11.7 analyses/s). This is the graded "intelligence" and is all our code. |
 | **ctld** | C17, `src/ctl/` | SCHED_OTHER, cores 0-1 | Control plane on a Unix domain socket: presets, limits, bypass, meters. It translates UI requests into parameter writes and is the only producer of the param block. It samples the status block at 20 Hz and serves meters to the ui. Always a separate daemon from the UI: the UI is Python and never maps shm, ctld is the sole producer of the shm param block, and CLAUDE.md keeps graded mechanisms out of Python. |
 | **ui** | Python, `ui/` | cores 0-1 | LAN web interface. It talks only to ctld's socket and never maps shm. It pushes meters to the browser over a WebSocket at 20 Hz. **No graded mechanism lives here.** |
 
-### IPC (all in shared memory via `shm_open`, mapped once at start)
+### IPC (all in shared memory via `shm_open`)
+audiod creates all four segments; analyzerd and ctld only attach, and attach again by name
+if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
 - **audiod → analyzerd:** a lock-free SPSC ring of interleaved (Source, System) float32
   frames, 2^17 frames long (1 MiB, ≈ 1.37 s: one FFT window plus the 100 ms delay search
   plus analyzer jitter). audiod pushes 48 frames (384 B) per period at 2000 periods/s,
   i.e. 768 KB/s (target period size -- see §3 data-flow rates, 96 frames as fallback).
   If the analyzer falls behind, the *reader* drops frames and counts them. audiod never
-  waits, which keeps the no-drop guarantee intact on the audio path.
+  waits, which keeps the no-drop guarantee intact on the audio path. audiod stores a
+  `claim` counter before writing each chunk and a `commit` counter after it. The reader
+  copies frames below `commit`, then re-checks `claim`: if the writer has reached its
+  frames, even mid-chunk, the copy is discarded (`src/common/ring.c`, resolved_issues.md C9).
 - **analyzerd → audiod:** a **triple-buffered** coefficient block (19 biquads × 5
   float64 coefficients = 760 B; ≤ 1.5 KB/s at the maximum publish rate). analyzerd
   publishes only when an estimate passes its gates (Source loud enough, coherence high
-  enough, change big enough), and never more than about once every 0.5–1 s. To publish, it
-  fills the free slot and then atomically stores that slot's index. audiod loads the index
-  once at the start of each period. If the index changed, audiod ramps from the old
-  coefficients to the new ones over that period and then releases the old slot. The third
-  slot means analyzerd never writes into a slot audiod is still reading or ramping from.
+  enough, change big enough), and never more than about once every 0.5–1 s. Each side
+  privately owns one slot, and a shared atomic word names the third (the "middle") plus a
+  fresh flag and a generation (`src/common/tbuf.c`, issues.md C8). To publish, analyzerd
+  fills its own slot and swaps it into the middle with the flag set. audiod loads the word
+  once at the start of each period. Only if the flag is set does it swap its slot for the
+  middle and copy the new coefficients into private state. It then ramps from the old to the
+  new coefficients over that period using only private copies, so it never holds a second
+  slot. analyzerd therefore always has a slot of its own to write.
 - **ctld → audiod:** a second **triple-buffered** param block (bypass, limits, presets,
   dynamics) with ctld as its only producer. A triple buffer allows only one writer, so
   ctld can't share analyzerd's coefficient block. audiod loads both indices once per
   period, so reading stays wait-free. ctld publishes on change, capped at 50/s. Bypass and
-  limits keep working while analyzerd is down.
+  limits keep working while analyzerd is down. After an audiod restart, both producers get
+  `-ESTALE`, reattach and republish their full current state; audiod stays muted until
+  ctld's republish arrives (§5, C11).
 - **audiod → ctld:** a meter/status block (peaks, gain reduction, xrun count, heartbeat
-  counter). audiod writes it every period (2000/s target) and ctld samples it at 20 Hz.
+  counter, `mute_state` and `mute_reason`, rejected-block count). audiod writes it every period (2000/s target) and ctld samples it at 20 Hz.
+  A single-writer seqlock (`src/common/seqlock.h`) protects it from torn reads. Its
+  other reader is audiod's own watchdog thread. soakcheck reads status through ctld's
+  socket, not shm (resolved_issues.md C10).
 
 ### Data-flow rates (decided 2026-10-26, fs = 96 kHz)
 | Flow | Rate |
@@ -194,7 +244,7 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 | Pi 5 → UMC202HD, playback (mono on L + R) | USB isochronous OUT, same rate as capture |
 | RP1 xHCI host ↔ ALSA mmap buffer ↔ audiod | rate set by ALSA period/buffer config (VERIFY round-trip via loopback) |
 | RP1 xHCI completion IRQ (cores 0-1, not core 3) → updates ALSA hw pointer (audiod polls it, never blocks) | rate set by period size (VERIFY in `/proc/interrupts`) |
-| audiod RT loop | target: 48 frames = 0.5 ms, 2000 periods/s (96 frames = 1 ms, 1000 periods/s fallback if snd-usb-audio rejects 48 -- VERIFY against its minimum period / `nrpacks`) |
+| audiod RT loop | target: 48 frames = 0.5 ms, 2000 periods/s (96 frames = 1 ms, 1000 periods/s fallback if snd-usb-audio rejects 48 -- VERIFY against its minimum period, `snd_pcm_hw_params_get_period_size_min`; issues.md H1) |
 | audiod → SPSC ring | 2000 pushes/s × 384 B = 768 KB/s |
 | ring → analyzerd | ≈ 11.7 analyses/s (hop 8192) |
 | analyzerd → coeff triple buffer | ≤ 1–2 publishes/s, 760 B each, gated |
@@ -237,10 +287,13 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 - **analyzerd dies:** audiod keeps running on the last-good coefficients and systemd
   restarts the analyzer. Audio is unaffected.
 - **audiod dies:** no GPIO mute pin exists on the UMC202HD, so audiod mutes by writing
-  silence to the ALSA playback buffer before teardown, and stays muted until its first
-  good period after restart. This protects drivers from pops and DC without a hardware
-  mute line. **Known gap:** this only covers a clean exit path -- if audiod hangs rather
-  than exiting, nothing writes silence until systemd's watchdog kills and restarts it.
+  silence to the ALSA playback buffer before teardown, and after restart stays muted until
+  the unmute gate below passes. This protects drivers from pops and DC without a hardware
+  mute line. The silence write only covers a clean exit. A crash (SIGSEGV, SIGKILL) or a
+  hang is covered by `stop_threshold` = buffer size (§1): the playback stream underruns
+  and stops within about 1 ms. A hang also trips the watchdog thread's stall exit (§2).
+  **Still open:** whether the UMC202HD pops when its OUT stream stops (issues.md C14). If
+  it does, playback switches to free-running silence fill (plan.md C14).
 - **xrun:** detect it via `snd_pcm_status` on either PCM, count it in the status block,
   and log from a non-RT thread. Recovery stops and relocks **both** capture and playback
   through the start sequence in §1 (`snd_pcm_prepare` both, start capture, let it settle,
@@ -249,19 +302,103 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   streaming. The 48 h soak should show zero xruns.
 - The limiter is in audiod, at sample accuracy, after EQ. Protection never depends on the
   analyzer being alive.
+- **Startup defaults and the mute gate (C11, plan.md).** audiod boots before any
+  coefficients or params exist, and `tbuf_init` zeroes every slot. An all-zero biquad
+  outputs silence and an all-zero param block gives a 0 ceiling, so a fresh slot is never
+  used as a default.
+  - *Defaults.* On every start, restarts included, audiod's private state is compiled in,
+    not read from shm:
+    - EQ: flat, all 19 biquads unity (b0 = 1, b1 = b2 = a1 = a2 = 0).
+    - Limiter: on, brickwall peak, -6 dBFS ceiling, no lookahead.
+    - Bypass: off.
+    - Output: muted. audiod still runs the whole chain (capture, EQ, limiter, ring push)
+      and writes zeros to playback, so the self-check measures the real processed output.
+      analyzerd's gates reject what it captures meanwhile.
+  - *Replacing a default.* A block replaces the current state only when
+    `tbuf_consumer_poll` returns 1 and the block validates:
+    - coefficients are all finite and every biquad is stable (|a2| < 1, |a1| < 1 + a2);
+    - the limiter ceiling is finite and ≤ 0 dBFS.
+
+    A block that fails is dropped, counted in the status block, and the current state is
+    kept.
+  - *Unmute gate* (MUTED → FADING_IN → LIVE). All three must hold:
+    - (a) both PCMs are locked through the §1 start sequence;
+    - (b) `SELFCHECK_MS` (proposed 250 ms; may grow once H3 measures the settle time) of
+      consecutive clean periods: no xrun, every capture and processed sample finite, and
+      the |mean| of the processed output under a DC bound;
+    - (c) ctld has published at least one valid param block since this audiod started,
+      so the user's ceiling is in force. While ctld is down the output stays muted.
+
+    Unmuting is a linear gain ramp from 0 to 1 over `FADE_IN_MS` (proposed 20 ms), never a
+    step.
+  - *Re-muting.*
+    - Any xrun returns to MUTED, and (b) re-runs after the relock. (c) stays satisfied for
+      the life of the process.
+    - A non-finite output sample mutes on that period.
+    - Unrecoverable exits keep the silence-on-teardown above. Crashes and hangs rely on
+      the stream thresholds and the stall exit (plan.md C14).
+  - *Between processes.* The status block carries `mute_state` and a `mute_reason`
+    bitmask (`WAIT_LOCK | WAIT_SELFCHECK | WAIT_PARAMS`), so ctld and ui can show why the
+    output is muted. After an audiod restart, ctld and analyzerd republish their current
+    state on `-ESTALE` (§3). ctld's republish lifts `WAIT_PARAMS`, and analyzerd's brings
+    back its last accepted coefficients.
 - **Restart policy:** errors fall into two classes.
   - *Recoverable* errors are handled in-process and only counted: xrun, a dropped ring
     frame, a rejected estimate.
-  - *Unrecoverable* errors (device lost, repeated recovery failures, corrupt shm) go
-    through this sequence: log, mute, goto-cleanup, exit with a distinct nonzero code.
-    systemd then restarts the daemon (`Restart=on-failure`, short `RestartSec`).
-    `StartLimitBurst` stops restart storms, and `RestartPreventExitStatus` covers config
-    errors, where restarting won't help. A process that hangs misses its watchdog ping and
-    gets killed and restarted the same way.
-- The shm segments (`/dev/shm`) outlive any one process, so a restarted audiod reattaches
-  and checks the segment's magic/version. It then resumes on the last-good coefficients
-  instead of coming back flat. A generation counter in the ring tells analyzerd that audiod
-  restarted, so it resets its delay estimate.
+  - *Unrecoverable* errors (device lost, repeated recovery failures) go through this
+    sequence: log, mute, goto-cleanup, exit with a distinct nonzero code. systemd then
+    restarts the daemon (`Restart=on-failure`, short `RestartSec`). `StartLimitBurst`
+    stops restart storms, and `RestartPreventExitStatus` covers config errors, where
+    restarting won't help. A process that hangs misses its watchdog ping and gets killed
+    and restarted the same way.
+  - *audiod's exit codes* (plan.md F10). 1 is internal, 10-19 restart, 20-29 are config
+    errors. Signal deaths restart.
+
+    | Code | Meaning | Restart? |
+    |---|---|---|
+    | 0 | clean stop (SIGTERM) | no |
+    | 1 | unexpected/internal error, incl. `-EBUSY` on open | yes |
+    | 10 | device lost mid-run (`-ENODEV`) | yes |
+    | 11 | relock failed N times in a row | yes |
+    | 12 | RT thread stalled (watchdog-thread backstop) | yes |
+    | 20 | rate, period or format negotiation failed | no |
+    | 21 | an shm segment can't be unlinked (`-EACCES`/`-EPERM`) | no |
+    | 22 | RT setup failed: sched, affinity or `mlockall` | no |
+
+    `RestartPreventExitStatus=20 21 22`.
+  - *analyzerd's exit codes* (plan.md F10). Same scheme; a shared code means the same
+    thing. Every runtime condition is handled in-process, so the table is short.
+
+    | Code | Meaning | Restart? |
+    |---|---|---|
+    | 0 | clean stop (SIGTERM) | no |
+    | 1 | unexpected/internal error (allocation, unexpected errno, broken invariant) | yes |
+    | 21 | an shm segment can't be opened (`-EACCES`/`-EPERM` from `shm_seg_attach`) | no |
+
+    `RestartPreventExitStatus=21`.
+  - Corrupt shm is *not* unrecoverable: a restart would find the same segment, so audiod
+    repairs it instead (below). The one shm config error is a segment audiod can't
+    unlink (`-EACCES`/`-EPERM`).
+- **Segment lifecycle (resolved_issues.md C12).** The shm segments (`/dev/shm`) outlive
+  any one process and are never unlinked on exit.
+  - *audiod creates and repairs.* On every start, `shm_seg_create` maps each segment at
+    its exact size. A segment of the wrong size or type, or one audiod can't open
+    read-write, is unlinked and recreated. A bad header in a usable segment is
+    re-initialised by `ring_init`/`tbuf_init`/`seqlock_init`. audiod never exits over
+    segment contents.
+  - *One generation per audiod start*, shared by all four segments: the previous gen
+    (read from the old status block) + 1, or a clock seed if that header was bad.
+    Readers see `-ESTALE` (the ring's tells analyzerd to reset its delay estimate).
+  - *analyzerd and ctld only attach.* They never exit over shm state (a permission error,
+    `-EACCES`/`-EPERM`, is config, not state: analyzerd exits 21, and ctld's code is
+    Aaron's, plan.md F10): they retry until
+    audiod has made a segment, reattach on `-ESTALE`, and after a stall check
+    `shm_seg_replaced` and attach by name again if audiod recreated the segment.
+  - *Coefficients after an audiod restart* come back only through analyzerd's republish
+    above; the EQ is flat until then. `tbuf_init` zeroes the slots, so nothing left in
+    shm by a crashed audiod is trusted.
+  - *Units:* analyzerd.service and ctld.service are `After=`/`Wants=audiod.service`,
+    never `BindsTo=`/`Requires=`, so they survive an audiod restart.
 
 ## 6. Proposed repo layout
 ```
