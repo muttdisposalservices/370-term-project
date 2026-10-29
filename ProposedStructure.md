@@ -51,7 +51,7 @@ Mic  ─► UMC202HD input 2 (combo XLR/TRS, MIDAS preamp) ┘                  
     else is a config error, exit 20 (§5).
   - *Format.* S32_LE, S24_3LE or S24_LE, per PCM. Conversion is picked once per lock:
     int → float64 for the biquads, float32 for the raw ring push, and float64 → int with
-    round and clamp (NaN → 0) for playback.
+    round and clamp (NaN or ±Inf → 0) for playback.
   - *sw_params, set on purpose on both PCMs:*
     - `stop_threshold` = buffer size, so a hung or dead audiod underruns and the stream
       stops within about 1 ms;
@@ -117,6 +117,15 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     `snd_pcm_avail_update()`, never `snd_pcm_avail()`. On arm64 the hw-pointer check may
     be an ioctl that takes the stream lock (issues.md F1). If so, this keeps it to a few
     calls per period.
+    - The loop gates on the capture PCM's avail.
+    - Each re-anchor is backdated by the frames already past the boundary:
+      anchor = now − (avail − period) frames. So a late detection (a delayed loop, or
+      several periods pending) doesn't push the next window late, and a backlog is
+      processed straight away.
+    - USB's hw pointer moves in packet-sized steps, so the backdate can over-correct
+      slightly. That only opens the window early.
+    - The first period after `snd_pcm_start` polls for a few ms while the first URBs
+      complete, once per lock (`src/common/pace.h`).
 - systemd is the **supervisor**. Each daemon is `Type=notify` with `WatchdogSec=10` and
   `Restart=on-failure`, and sends `WATCHDOG=1` every 5 s (half the interval). The
   watchdog covers the CLAUDE.md heartbeat requirement and catches hangs. Clean exit codes
@@ -137,6 +146,15 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   watchdog. If the heartbeat stalls for about 100 ms, the thread logs why and exits with
   code 12 (§5), so systemd restarts audiod at once instead of after `WatchdogSec`. It
   never calls alsa-lib on the RT thread's handles (plan.md C14).
+  - The stall timer arms on the first observed heartbeat change, not on the first check.
+    A slow but healthy startup (PCM open, hw_params, the capture settle) can't trip it,
+    and a hang before the first heartbeat is caught because `READY=1` is never sent
+    (`TimeoutStartSec`).
+  - Once armed, any 100 ms gap trips it, so the RT thread bumps the heartbeat inside its
+    settle and relock loops too.
+  - A failed status read counts as no progress.
+  - The age runs from when a change was observed, so a delayed watchdog thread detects a
+    stall late but never reports a false one (`src/common/stall.h`).
   - **DECIDED (2026-10-28): audiod's RT thread pins itself in code; nothing demotes the
     non-RT thread.** A unit-file `CPUAffinity=`/`CPUSchedulingPolicy=fifo` would apply to
     the whole process at `exec`, and every subsequently `pthread_create`'d thread inherits
@@ -309,7 +327,9 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
   - *Defaults.* On every start, restarts included, audiod's private state is compiled in,
     not read from shm:
     - EQ: flat, all 19 biquads unity (b0 = 1, b1 = b2 = a1 = a2 = 0).
-    - Limiter: on, brickwall peak, -6 dBFS ceiling, no lookahead.
+    - Limiter: on, brickwall peak, -6 dBFS ceiling, no lookahead. It has instant attack
+      and a fixed 50 ms exponential release (`LIMITER_RELEASE_MS`). Release can move into
+      the param block once that layout exists.
     - Bypass: off.
     - Output: muted. audiod still runs the whole chain (capture, EQ, limiter, ring push)
       and writes zeros to playback, so the self-check measures the real processed output.
@@ -317,6 +337,8 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
   - *Replacing a default.* A block replaces the current state only when
     `tbuf_consumer_poll` returns 1 and the block validates:
     - coefficients are all finite and every biquad is stable (|a2| < 1, |a1| < 1 + a2);
+    - no band has an all-zero numerator (b0 = b1 = b2 = 0). An all-zero slot is finite
+      and stable, so this is the rule that rejects it;
     - the limiter ceiling is finite and ≤ 0 dBFS.
 
     A block that fails is dropped, counted in the status block, and the current state is
@@ -326,6 +348,14 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
     - (b) `SELFCHECK_MS` (proposed 250 ms; may grow once H3 measures the settle time) of
       consecutive clean periods: no xrun, every capture and processed sample finite, and
       the |mean| of the processed output under a DC bound;
+      - The mean is taken over the whole window, under `DC_BOUND` = 0.01 (−40 dBFS). A
+        single 0.5 ms period is too short, since bass looks like DC over one period.
+      - While muted and locked, the check re-runs every window until ctld's first param
+        block arrives, so the unmute rests on the most recent window.
+      - Accepted, fail-safe limitation: a sustained loud sub-bass tone with a non-whole
+        number of cycles per window can fail every window. For example, 22 Hz at −6 dBFS
+        gives |mean| ≈ 0.029, and the output stays muted while the tone lasts
+        (`src/common/mutegate.h`).
     - (c) ctld has published at least one valid param block since this audiod started,
       so the user's ceiling is in force. While ctld is down the output stays muted.
 
