@@ -1,15 +1,15 @@
-# Plan: decided design changes (2026-10-28; C11, C13-C16, F1, F2, F5 and F8-F11 added 2026-10-29)
+# Plan: decided design changes (2026-10-28; C11, C13-C16, F1, F2, F5, F6 and F8-F11 added 2026-10-29)
 
 These are the decisions that came out of the docs review. Each one is already written into
 ProposedStructure.md (and the SVGs where noted). This file turns them into work: what to
 build, which component it touches, and what's still outstanding. Entries keep their
-original IDs (C1-C7, C11, C13-C16, F1, F2, F5, F8-F11), because other files refer to them,
+original IDs (C1-C7, C11, C13-C16, F1, F2, F5, F6, F8-F11), because other files refer to them,
 e.g. `os/rt-tune.sh` and `os/VERIFY.md` cite "issues.md C6/C7". The original issue text
 is in [resolved_issues.md](resolved_issues.md). Open questions and hardware checks stay in
 [issues.md](issues.md).
 
 Owners follow CLAUDE.md's Ownership section. Hazel owns audiod, analyzerd, ui, tools and
-systemd/ (taken on 2026-10-28, see issues.md F7). Aaron owns the hardware, the Makefile,
+systemd/. Aaron owns the hardware, the Makefile,
 ctld and os/. Hardware checks on the unit are Aaron's.
 
 ## Decisions
@@ -278,8 +278,44 @@ ctld and os/. Hardware checks on the unit are Aaron's.
     `LimitMEMLOCK`, and a restart can't fix that.
   - A signal death (SIGSEGV, the watchdog's SIGKILL) restarts under `Restart=on-failure`.
 - **Build:** the header; every exit path uses it; the unit line.
-- **Outstanding:** analyzerd's codes (Hazel) and ctld's (Aaron), in the same scheme
-  (issues.md F10).
+- **Outstanding:** ctld's codes (Aaron), in the same scheme (issues.md F10). analyzerd's
+  are F10 (analyzerd) below.
+
+### F10 (analyzerd). Exit codes. Components: analyzerd, systemd. Owner: Hazel
+- **Decided:** these codes, in audiod's scheme. A code shared with audiod means the same
+  thing in both.
+
+  | Code | Meaning | Restart? |
+  |---|---|---|
+  | 0 | clean stop (SIGTERM) | no |
+  | 1 | unexpected/internal error: a failed allocation (`fft_init` -ENOMEM, analysis buffers), an unexpected errno from a syscall or `shm_seg_attach` (e.g. -EMFILE, -ENOMEM), a broken invariant | yes |
+  | 21 | an shm segment can't be opened (`-EACCES`/`-EPERM` from `shm_seg_attach`) | **no** |
+
+  - `RestartPreventExitStatus=21`. Signal deaths restart, including the SIGABRT from
+    `WatchdogSec=10`.
+  - Every runtime condition is handled in-process, so none needs an exit:
+    - shm absent, replaced or stale (C12): retry, reattach, republish (C11);
+    - ring `-EPIPE`/`-ESTALE`: reset the window;
+    - rejected estimates: counted.
+  - No 10-19 codes. audiod's cover device loss, relock failure and an RT stall, and none
+    of those exist here. analyzerd is single-threaded, so a hang goes to systemd's
+    watchdog. The range stays reserved.
+  - No 20 or 22. analyzerd negotiates no device and does no RT setup (F6). systemd
+    applies `CPUAffinity=2` before exec, and a failure there is systemd's own 215.
+  - 21 narrows C12's "never exit over shm state": a permission error is config, not
+    state.
+    - It isn't transient. `shm_seg_create` creates as dspunit with owner rw even before
+      its `fchmod`, and a half-made segment has size 0, which is `-EPROTO` (retry).
+    - So EACCES means analyzerd isn't running as `dspunit` (F9), or a foreign segment is
+      in `/dev/shm`, in which case audiod exits 21 as well.
+    - Retrying forever would leave a READY, heartbeating daemon that never analyses,
+      with nothing in the journal saying why.
+  - Non-finite analysis state isn't an exit either. A NaN in a recursive smoother would
+    poison every later estimate, so analyzerd resets that state the way it resets the
+    window, and counts the reset.
+- **Build:** an exit-code header next to analyzerd's main.c (once F4 lands); every exit
+  path uses it; `RestartPreventExitStatus=21` in `analyzerd.service`.
+- **Outstanding:** none.
 
 ### F11 (unit). rt-tune.service, wanted by audiod for now. Component: systemd. Owner: Hazel (rt-tune.sh: Aaron)
 - **Decided:**
@@ -326,6 +362,27 @@ ctld and os/. Hardware checks on the unit are Aaron's.
 - **Outstanding:** `LDLIBS_CTLD` needs `-lm` before ctld gets sources, because every
   src/common object is linked into every daemon (issues.md F4: Aaron).
 
+### F6. analyzerd runs SCHED_OTHER on core 2. Components: analyzerd, systemd. Owner: Hazel
+- **Decided:** SCHED_OTHER, not FIFO 10.
+  - analyzerd has no hard deadline. A late analysis only makes the correction a little
+    stale, since audiod keeps applying the last published coefficients. If it falls far
+    behind, the ring returns `-EPIPE` and analyzerd resets its window, which is already
+    designed in.
+  - It needs well under 10% of a core (F5). Core 2 isn't isolated (`isolcpus=3` only),
+    but a fair CFS share is far more than that, even under the planned `stress-ng` load
+    on cores 0-2.
+  - FIFO would cost more than it gives:
+    - A spinning bug could starve the per-CPU kworkers on core 2. That gets worse if
+      F14 ends with `sched_rt_runtime_us=-1`, which removes RT throttling everywhere.
+    - analyzerd would need `LimitRTPRIO`, and could hit F9's `CONFIG_RT_GROUP_SCHED`
+      `EPERM`.
+    - Tests and the Pi would no longer schedule it the same way.
+- **Build:** `systemd/analyzerd.service` sets `CPUAffinity=2`, and sets no
+  `CPUSchedulingPolicy=` or `LimitRTPRIO=`. analyzerd is single-threaded, so the
+  affinity covers the whole process.
+- **Outstanding:** none. If the soak shows analyses lagging because of other work on
+  core 2, try `Nice=-5` (or move that work off core 2) before any RT class.
+
 ## Leftover actions from these decisions
 - **Hazel:** re-export `images/dsp-architecture.png` from the SVG after the C1, C5 and C6
   edits. The diagram is Hazel's, though it has been edited jointly.
@@ -348,7 +405,8 @@ These parts depend only on decided items. All of them are Hazel's. Tests are sha
   - the time-gated poll (F1);
   - `READY=1` after lock (F2);
   - the exit-code header (F10).
-- **systemd/:** `audiod.service` and `rt-tune.service` (C5, C13, F2, F9, F10, F11).
+- **systemd/:** `audiod.service` and `rt-tune.service` (C5, C13, F2, F9, F10, F11), and
+  `analyzerd.service` (F6, F8, F9, F10).
 - **analyzerd:** GCC-PHAT delay estimation, H(f) smoothing and the EQ solver, as pure
   functions tested on synthetic WAVs. They go in src/common/ for now, as the FFT did
   (F5). The first `.c` in analysis/ makes `make` link analyzerd, and that fails without a

@@ -6,9 +6,8 @@ This file lists only the issues that still need addressing. Related files:
 - [plan.md](plan.md): the C1-C7 decisions, written as work items.
 
 Legend:
-- **Owner tags** follow CLAUDE.md's Ownership section, plus systemd/:
-  - **[Hazel]** owns audiod, analyzerd, ui and tools, and systemd/ (taken on
-    2026-10-28; not yet in CLAUDE.md, see F7).
+- **Owner tags** follow CLAUDE.md's Ownership section:
+  - **[Hazel]** owns audiod, analyzerd, ui, tools and systemd/.
   - **[Aaron]** owns the hardware, the Makefile, ctld and os/.
   - **[Hazel; HW: Aaron]**: Hazel owns the code or decision; Aaron does the check on the
     unit.
@@ -26,8 +25,8 @@ Legend:
 - **SOFT:** work can start, but this must be decided before the component is done.
 - **PROPOSED:** a recommendation only. It isn't decided.
 
-F8 was decided by C12 and is now in plan.md. C15, F2, F5 and D2 were settled on 2026-10-29
-and have left this file. Hazel's sides of C13, C14, C16, F1, F9, F10 (audiod) and F11 were
+F8 was decided by C12 and is now in plan.md. C15, F2, F5, F6, F7 and D2 were settled
+on 2026-10-29 and have left this file. Hazel's sides of C13, C14, C16, F1, F9, F10 (audiod, analyzerd) and F11 were
 decided the same day and are in plan.md; only the remaining parts are listed below.
 
 IDs are kept from the earlier version (C8-C17, D1-D4, F1-F12; F3 became H1-H4) so
@@ -183,13 +182,9 @@ the other side reviews.
     `-lm`, so ctld's link fails once `src/ctl/` has sources. Fix: add `-lm` to
     `LDLIBS_CTLD`, or link src/common as a static archive so each daemon pulls in only
     the objects it uses.
-- **[Hazel]** **F6. The scheduling class is undecided. SOFT.** ProposedStructure.md:161
-  says "SCHED_OTHER (or FIFO 10)". The unit file needs one answer.
 
 ## 4. systemd units
 
-- **[Hazel]** **F7. systemd/ ownership isn't recorded. SOFT.** Hazel took systemd/ on
-  2026-10-28, but CLAUDE.md's Ownership list doesn't include it yet. Add it there.
 - **[Aaron]** **F9. Create the `dspunit` service user. SOFT.** Decided (plan.md F9): all
   three daemons run as one system user, `dspunit`, not root. The units add the groups and
   limits.
@@ -199,10 +194,13 @@ the other side reviews.
   - **[HW CHECK]** Once audiod runs: if it exits 22 because `pthread_setschedparam` fails
     with `EPERM` despite `LimitRTPRIO=80`, paste the kernel config's
     `CONFIG_RT_GROUP_SCHED` line.
-- **[Hazel + Aaron]** **F10. Exit codes for analyzerd and ctld. SOFT.** audiod's table is
+- **[Aaron]** **F10. Exit codes for ctld. SOFT.** audiod's and analyzerd's tables are
   decided (plan.md F10, ProposedStructure.md §5). The scheme is 1 internal, 10-19
-  restart, 20-29 config errors listed in `RestartPreventExitStatus`. Still needed, in the
-  same scheme: analyzerd's codes (Hazel) and ctld's (Aaron).
+  restart, 20-29 config errors listed in `RestartPreventExitStatus`, and a code shared
+  between daemons means the same thing. Still needed, in the same scheme: ctld's codes.
+  - analyzerd exits 21 on `-EACCES`/`-EPERM` from `shm_seg_attach`: a permission error
+    is config, not shm state. ctld probably wants the same, which narrows the "never
+    exiting over shm state" bullet in C12 above.
 - **[Aaron]** **[HW CHECK] F11. rt-tune.service can block audiod over a log line. SOFT.**
   - `os/rt-tune.sh` `die`s if `/xhci_hcd/` matches nothing in /proc/interrupts. Since
     C6, that match only feeds a log message.
@@ -265,9 +263,7 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - F6;
   - the loop side of F14, once Aaron's check is in;
-  - systemd/: F7 and the analyzerd codes in F10;
   - D4;
   - the dsp-architecture.png re-export (plan.md).
 - **Aaron:**

@@ -22,9 +22,13 @@ History only. Nothing here needs action.
   items are still tracked in issues.md.
 - **The audiod and systemd items** (C13-C16, F1, F2, F9-F11 and D2) were decided on
   2026-10-29. C15, F2 and D2 are fully closed. The rest are restated in plan.md, and
-  Aaron's remaining checks (plus analyzerd's F10 codes) are tracked in issues.md.
+  Aaron's remaining checks are tracked in issues.md. analyzerd's F10 codes followed the
+  same day.
 - **F5** was decided and implemented on 2026-10-29. It's restated in plan.md. The `-lm`
   note it leaves for Aaron is tracked under issues.md F4.
+- **F6** was decided on 2026-10-29. It's restated in plan.md and is fully closed.
+- **F7** was closed on 2026-10-29: CLAUDE.md's Ownership section lists systemd under
+  Hazel.
 
 Line references (`:NN`, `dsp:NN`) point at the files as they were when each issue was
 written, so they no longer match the current files.
@@ -556,7 +560,12 @@ unlink).
 
 **Decision (audiod):** the table in plan.md F10 and ProposedStructure.md §5. The scheme is
 1 internal, 10-19 restart, 20-29 config, with `RestartPreventExitStatus=20 21 22`.
-analyzerd's and ctld's codes remain in issues.md.
+
+**Decision (analyzerd, 2026-10-29):** 0 clean stop, 1 internal, 21 shm permission
+(`-EACCES`/`-EPERM` from `shm_seg_attach`), with `RestartPreventExitStatus=21`
+(plan.md F10 (analyzerd), ProposedStructure.md §5). Every other runtime condition is
+handled in-process. Code 21 narrows C12's "never exit over shm state" above: a
+permission error is config, not state. ctld's codes remain in issues.md.
 
 ### F11 (issues.md §4, Hazel's part)
 **Original text:** Writing `systemd/rt-tune.service` itself, and whether audiod uses
@@ -591,6 +600,30 @@ FFTW explicitly, given the "intelligence in analysis/ is ours" boundary.
 - It's in `src/common/fft.{h,c}` with tests in `tests/test_fft.c`. It isn't in
   `analysis/` because of F4.
 - It leaves one Makefile item for Aaron: `LDLIBS_CTLD` needs `-lm` (issues.md F4).
+
+## F6. Decided (2026-10-29). See plan.md
+
+**Original text (issues.md §3):** The scheduling class is undecided. SOFT.
+ProposedStructure.md:161 says "SCHED_OTHER (or FIFO 10)". The unit file needs one answer.
+
+**Decision:** SCHED_OTHER, with `CPUAffinity=2` in the unit.
+- analyzerd's deadlines are soft. A late analysis only delays a correction, and falling
+  far behind is already handled by the ring's `-EPIPE` reset. It needs well under 10% of
+  a core.
+- FIFO 10 would risk starving core 2's kworkers if analyzerd ever spins. That's worse if
+  F14 disables RT throttling. It would also need `LimitRTPRIO` and could hit F9's `EPERM`
+  case.
+- ProposedStructure.md's analyzerd row now gives the one answer. Fully closed.
+
+## F7. Closed (2026-10-29)
+
+**Original text (issues.md §4):** systemd/ ownership isn't recorded. SOFT. Hazel took
+systemd/ on 2026-10-28, but CLAUDE.md's Ownership list doesn't include it yet. Add it
+there.
+
+**Fix:** CLAUDE.md's Ownership section now lists "systemd: system controls" under Hazel.
+The "not yet in CLAUDE.md" notes in issues.md's legend and plan.md's intro are removed.
+Fully closed.
 
 ## Stale text (Hazel's items). Fixed (2026-10-29)
 

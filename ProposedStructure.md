@@ -194,7 +194,7 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 | Process | Lang / dir | Sched / core | Job |
 |---|---|---|---|
 | **audiod** | C17, `src/audio/` | RT thread: SCHED_FIFO 80, core 3 (self-pinned in code, §2); non-RT thread: SCHED_OTHER, cores 0-1 (default affinity, not pinned); `mlockall` (process-wide) | ALSA `hw:` mmap full-duplex loop, paced by polling the mmap hw pointer each period (mechanism B) rather than blocking in `poll()`/`snd_pcm_wait()`. Per period it reads L/R, applies the current EQ biquads (19 × 1/3-octave, float64) and dynamics (comp/gate/**limiter**) to Source, writes to the DAC, and pushes raw L/R into the analysis ring. No malloc, no syscalls that block, no logging in the loop. |
-| **analyzerd** | C17, `analysis/` | SCHED_OTHER (or FIFO 10), core 2 | Reads the ring and estimates the acoustic delay between Source and System (cross-correlation / GCC-PHAT). It then computes the smoothed transfer function H(f) = System/Source and derives *bounded* EQ corrections. These are published as a new coefficient set. Analysis uses a 32768-point FFT (our own radix-2, `src/common/fft.c`, plan.md F5) with a hop of 8192 (341 ms window, 2.9 Hz bins, ≈ 11.7 analyses/s). This is the graded "intelligence" and is all our code. |
+| **analyzerd** | C17, `analysis/` | SCHED_OTHER, core 2 (`CPUAffinity=2` in the unit, plan.md F6) | Reads the ring and estimates the acoustic delay between Source and System (cross-correlation / GCC-PHAT). It then computes the smoothed transfer function H(f) = System/Source and derives *bounded* EQ corrections. These are published as a new coefficient set. Analysis uses a 32768-point FFT (our own radix-2, `src/common/fft.c`, plan.md F5) with a hop of 8192 (341 ms window, 2.9 Hz bins, ≈ 11.7 analyses/s). This is the graded "intelligence" and is all our code. |
 | **ctld** | C17, `src/ctl/` | SCHED_OTHER, cores 0-1 | Control plane on a Unix domain socket: presets, limits, bypass, meters. It translates UI requests into parameter writes and is the only producer of the param block. It samples the status block at 20 Hz and serves meters to the ui. Always a separate daemon from the UI: the UI is Python and never maps shm, ctld is the sole producer of the shm param block, and CLAUDE.md keeps graded mechanisms out of Python. |
 | **ui** | Python, `ui/` | cores 0-1 | LAN web interface. It talks only to ctld's socket and never maps shm. It pushes meters to the browser over a WebSocket at 20 Hz. **No graded mechanism lives here.** |
 
@@ -365,6 +365,16 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
     | 22 | RT setup failed: sched, affinity or `mlockall` | no |
 
     `RestartPreventExitStatus=20 21 22`.
+  - *analyzerd's exit codes* (plan.md F10). Same scheme; a shared code means the same
+    thing. Every runtime condition is handled in-process, so the table is short.
+
+    | Code | Meaning | Restart? |
+    |---|---|---|
+    | 0 | clean stop (SIGTERM) | no |
+    | 1 | unexpected/internal error (allocation, unexpected errno, broken invariant) | yes |
+    | 21 | an shm segment can't be opened (`-EACCES`/`-EPERM` from `shm_seg_attach`) | no |
+
+    `RestartPreventExitStatus=21`.
   - Corrupt shm is *not* unrecoverable: a restart would find the same segment, so audiod
     repairs it instead (below). The one shm config error is a segment audiod can't
     unlink (`-EACCES`/`-EPERM`).
@@ -378,7 +388,9 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
   - *One generation per audiod start*, shared by all four segments: the previous gen
     (read from the old status block) + 1, or a clock seed if that header was bad.
     Readers see `-ESTALE` (the ring's tells analyzerd to reset its delay estimate).
-  - *analyzerd and ctld only attach.* They never exit over shm state: they retry until
+  - *analyzerd and ctld only attach.* They never exit over shm state (a permission error,
+    `-EACCES`/`-EPERM`, is config, not state: analyzerd exits 21, and ctld's code is
+    Aaron's, plan.md F10): they retry until
     audiod has made a segment, reattach on `-ESTALE`, and after a stall check
     `shm_seg_replaced` and attach by name again if audiod recreated the segment.
   - *Coefficients after an audiod restart* come back only through analyzerd's republish
