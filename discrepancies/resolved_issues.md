@@ -20,6 +20,9 @@ History only. Nothing here needs action.
   in plan.md. Aaron's ctld-side review is tracked in issues.md.
 - **Hazel's stale-text items** (issues.md §7) were fixed on 2026-10-29. Aaron's stale-text
   items are still tracked in issues.md.
+- **The audiod and systemd items** (C13-C16, F1, F2, F9-F11 and D2) were decided on
+  2026-10-29. C15, F2 and D2 are fully closed. The rest are restated in plan.md, and
+  Aaron's remaining checks (plus analyzerd's F10 codes) are tracked in issues.md.
 
 Line references (`:NN`, `dsp:NN`) point at the files as they were when each issue was
 written, so they no longer match the current files.
@@ -432,6 +435,143 @@ restarts.
 
 ProposedStructure.md §3 (IPC) and §5 updated to match. CtldOutline.md §9 is Aaron's and
 still says "corrupt shm → exit"; that is tracked in issues.md.
+
+## audiod and systemd items (C13-C16, F1, F2, F9-F11, D2). Decided (2026-10-29). See plan.md
+
+Each decision is restated as a plan.md entry with the same ID, and ProposedStructure.md
+§1, §2 and §5 were updated to match. The original text follows.
+
+### C13 (issues.md §2)
+**Original text:** A missing or lost device leaves audio down for good. Aaron owns the
+udev rule (os/); Hazel owns the audiod.service dependency. Nothing orders audiod after the
+ALSA card exists. If the UMC202HD is late or unplugged, audiod reports "device lost" and
+restarts repeatedly until `StartLimitBurst` stops it. Audio then stays down with no
+recovery path. dsp:275 mentions hotplug, but no doc says what happens then.
+**PROPOSED:** a udev rule (os/) that tags the card `TAG+="systemd"` with a stable
+`SYSTEMD_ALIAS`, plus `BindsTo=`/`After=` on that device unit in audiod.service.
+
+**Decision:** the proposal, plus `WantedBy=dev-umc202hd.device`. `BindsTo=` alone only
+stops audiod on unplug, so audio would still stay down after a replug. The rule matches
+the ALSA card device, not the USB device. Aaron's rule and an unplug check remain in
+issues.md.
+
+### C14 (issues.md §2)
+**Original text:** Muting on crash and on stream stop is undefined. §5 covers a clean exit
+and calls out a hang. Still undefined:
+- A SIGSEGV or a watchdog SIGKILL also skips the silence write.
+- What the UMC202HD outputs when the USB OUT stream stops: silence, or a pop.
+- What the ALSA `sw_params` (`stop_threshold`) do on underrun. With the defaults the
+  stream stops on underrun, so the "hang" gap is actually short. Set these on purpose.
+
+**PROPOSED:**
+- **Threshold.** Set `stop_threshold` = buffer size explicitly, so a hung audiod underruns
+  and the stream stops within about 1 ms (48 frames × 2 periods at 96 kHz). This needs no
+  other process.
+- **Watchdog thread as a backstop.** If the heartbeat stalls for a few periods, it calls
+  `snd_pcm_drop` on playback, logs why, and stops sending `WATCHDOG=1`. Before relying on
+  this, check whether alsa-lib allows a second thread to call `snd_pcm_drop` on a `hw:`
+  handle the RT thread is using.
+- **No silence writer in systemd.** By `ExecStopPost=` time the kernel has closed the PCM
+  fd and stopped the stream, and playing zeros there would start a new OUT stream.
+
+Whether the UMC202HD pops when its OUT stream stops still needs a check on the hardware.
+
+**Decision:** the threshold and no systemd silence writer, as proposed. Two changes:
+- `start_threshold` = boundary as well. Otherwise the playback silence pre-fill would
+  autostart playback before capture settles (C4).
+- The watchdog thread exits with code 12 instead of calling `snd_pcm_drop`. The threshold
+  already stops the stream, and exiting gets an immediate restart without touching
+  alsa-lib from a second thread.
+
+The pop check remains in issues.md. If it pops, the fallback is free-running silence fill
+(plan.md C14).
+
+### C15 (issues.md §2)
+**Original text:** Sample-rate negotiation has no failure rule. The rate is "negotiated …
+target 96 kHz" (:27, dsp:45). If hw_params returns a different rate, every constant
+shifts: period length in ms, FFT window, ring length in seconds, and biquad design.
+**PROPOSED:** anything other than 96 kHz with 48 or 96 frames is a config error with a
+distinct exit code listed in `RestartPreventExitStatus` (see F10).
+
+**Decision:** the proposal (exit 20). In addition, capture and playback must agree on
+rate, period and buffer size, and `-EBUSY` on open is a normal restartable error, not a
+config error. Fully closed.
+
+### C16 (issues.md §2)
+**Original text:** The sample-format conversion point isn't specified. UMC202HD capture is
+likely S24_3LE or S32_LE (confirm with `/proc/asound/card*/stream0` on the Pi). The ring
+holds float32 and the biquads use float64. **PROPOSED:** convert in the RT loop (int →
+float64 for the biquads, float32 into the ring), with a switch on whichever format
+hw_params negotiated.
+
+**Decision:** the proposal, with these specifics:
+- a whitelist of S32_LE, S24_3LE and S24_LE (else exit 20);
+- the switch made once per period, outside the per-sample loop;
+- pure conversion functions with unit tests in src/common/.
+
+The format check remains in issues.md.
+
+### F1 (issues.md §2)
+**Original text:** Polling with no syscall (mechanism B) is probably not true on arm64.
+ProposedStructure.md and rework.md say audiod reads the hw pointer "directly in memory"
+with "no syscall per check". The kernel likely allows mmap of the PCM status/control pages
+only on x86/PPC/Alpha; on arm64, alsa-lib falls back to the `SNDRV_PCM_IOCTL_SYNC_PTR`
+ioctl, which takes the PCM stream lock that the xHCI IRQ thread also takes. Check with
+`strace -c` on the Pi before writing the loop around it.
+
+**Decision:** write the loop so it doesn't depend on the answer: a time-gated poll that
+spins on vDSO `clock_gettime` and calls `snd_pcm_avail_update()` only near the predicted
+boundary. The strace check remains in issues.md, now only to tune the margin and the
+rationale wording.
+
+### F2 (issues.md §2)
+**Original text:** `READY=1` timing is undefined. Before or after both streams are locked?
+This sets audiod's `TimeoutStartSec` and when units ordered `After=audiod` start. Suggest:
+after lock.
+
+**Decision:** after lock (and after the shm segments exist), before unmute. Waiting for
+unmute would deadlock, since unmute needs ctld and ctld is ordered after audiod.
+`TimeoutStartSec=15s`. Fully closed.
+
+### F9 (issues.md §4)
+**Original text:** The service user and permissions are undefined. The unit files are
+Hazel's; creating the user on the Pi is os/ work, so Aaron's. Do the daemons run as root
+or as a dedicated user? If not root: audiod needs `LimitRTPRIO=80` (or `CAP_SYS_NICE`) and
+`SupplementaryGroups=audio`, on top of `LimitMEMLOCK=infinity`; all three daemons need a
+shared group for the `/dev/shm` segments; it should be a *system* user, so logind's
+`RemoveIPC` never deletes the segments.
+
+**Decision:** one system user, `dspunit`, for all three daemons, with segments at mode
+0600. A single user needs no shared group, and per-daemon users with group write would
+add setup without adding isolation. No `DynamicUser=`. Creating the user and an EPERM
+check remain in issues.md.
+
+### F10 (issues.md §4)
+**Original text:** There's no exit-code table. Hazel lists the codes for audiod and
+analyzerd and puts them in the units' `RestartPreventExitStatus`. Aaron lists the codes
+for ctld. audiod's list must include the shm config error from C12 (a segment it can't
+unlink).
+
+**Decision (audiod):** the table in plan.md F10 and ProposedStructure.md §5. The scheme is
+1 internal, 10-19 restart, 20-29 config, with `RestartPreventExitStatus=20 21 22`.
+analyzerd's and ctld's codes remain in issues.md.
+
+### F11 (issues.md §4, Hazel's part)
+**Original text:** Writing `systemd/rt-tune.service` itself, and whether audiod uses
+`Requires=` or `Wants=` on it.
+
+**Decision:** a oneshot with `RemainAfterExit=yes` and `Conflicts=irqbalance.service`.
+audiod uses `Wants=` during bring-up, so a spurious rt-tune failure costs jitter, not all
+audio, and moves to `Requires=` once Aaron's rt-tune.sh fix lands. The switch is
+plan.md F11's Outstanding item; the script fix remains in issues.md.
+
+### D2 (issues.md §6)
+**Original text:** The watchdog doesn't cover exit codes. ProposedStructure.md:103 says
+the watchdog setup "covers … clean exit codes", but exit codes come from the
+error-handling policy in §5.
+
+**Fix:** ProposedStructure.md §2 now says the watchdog covers the heartbeat and hangs, and
+that exit codes come from §5 and its table. Fully closed.
 
 ## Stale text (Hazel's items). Fixed (2026-10-29)
 

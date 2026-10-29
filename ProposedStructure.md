@@ -45,6 +45,19 @@ Mic  ─► UMC202HD input 2 (combo XLR/TRS, MIDAS preamp) ┘                  
   a capture xrun destroys playback's clock reference outright, and a playback-only xrun
   is handled the same way for one code path, even though capture itself was unaffected
   (see §5).
+- **DECIDED (2026-10-29): negotiation and stream thresholds (plan.md C14-C16).**
+  - *Rate and period.* hw_params sets exactly 96 kHz (no resampling) and 48 frames, else
+    96, with a 2-period buffer. Capture and playback must agree on all three. Anything
+    else is a config error, exit 20 (§5).
+  - *Format.* S32_LE, S24_3LE or S24_LE, per PCM. Conversion is picked once per lock:
+    int → float64 for the biquads, float32 for the raw ring push, and float64 → int with
+    round and clamp (NaN → 0) for playback.
+  - *sw_params, set on purpose on both PCMs:*
+    - `stop_threshold` = buffer size, so a hung or dead audiod underruns and the stream
+      stops within about 1 ms;
+    - `start_threshold` = boundary, so the playback silence pre-fill can't autostart
+      playback before capture settles;
+    - `avail_min` = one period.
 - **Known quirk:** a one-time "clock source N is not valid" dmesg line at USB probe, tied to
   implicit-feedback-mode support on the UMC 202/204/404 HD series. Fixed upstream around
   kernel 5.19+ and reported harmless once that fix is present. Since §2 already requires a
@@ -98,9 +111,19 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   still fires on every USB completion -- it just updates the hw pointer that the spin
   loop reads, rather than waking a sleeping thread. Since audiod never waits on it, it
   doesn't need to share a core with the thread it updates.
+  - **DECIDED (2026-10-29): the poll is time-gated (plan.md F1).** The loop spins on
+    `clock_gettime(CLOCK_MONOTONIC)` (vDSO, no syscall) until about 50 µs before the
+    predicted boundary, re-anchored every period. Only then does it poll
+    `snd_pcm_avail_update()`, never `snd_pcm_avail()`. On arm64 the hw-pointer check may
+    be an ioctl that takes the stream lock (issues.md F1). If so, this keeps it to a few
+    calls per period.
 - systemd is the **supervisor**. Each daemon is `Type=notify` with `WatchdogSec=10` and
-  `Restart=on-failure`, and sends `WATCHDOG=1` every 5 s (half the interval). This covers
-  the CLAUDE.md requirement of a heartbeat within 60 s and clean exit codes. For
+  `Restart=on-failure`, and sends `WATCHDOG=1` every 5 s (half the interval). The
+  watchdog covers the CLAUDE.md heartbeat requirement and catches hangs. Clean exit codes
+  come from the §5 restart policy and its exit-code table, not from the watchdog. audiod
+  sends `READY=1` once its shm segments exist and both PCMs are locked, before unmute.
+  ctld is ordered after it and the unmute needs ctld, so waiting for unmute would
+  deadlock. `TimeoutStartSec=15s` (plan.md F2). For
   single-threaded daemons (analyzerd, ctld), scheduling setup goes in the unit files
   (`CPUAffinity=`, `CPUSchedulingPolicy=fifo`, `CPUSchedulingPriority=`), not in code.
   audiod's unit sets only `LimitMEMLOCK=infinity` (for `mlockall`) -- no
@@ -110,7 +133,9 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   the RT loop makes no blocking syscalls (it still makes non-blocking ones, e.g. the ALSA
   mmap ioctls). That thread sends `WATCHDOG=1` only if the status-block
   heartbeat counter has advanced since its last check, so a stuck RT loop still trips the
-  watchdog.
+  watchdog. If the heartbeat stalls for about 100 ms, the thread logs why and exits with
+  code 12 (§5), so systemd restarts audiod at once instead of after `WatchdogSec`. It
+  never calls alsa-lib on the RT thread's handles (plan.md C14).
   - **DECIDED (2026-10-28): audiod's RT thread pins itself in code; nothing demotes the
     non-RT thread.** A unit-file `CPUAffinity=`/`CPUSchedulingPolicy=fifo` would apply to
     the whole process at `exec`, and every subsequently `pthread_create`'d thread inherits
@@ -129,6 +154,17 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     own. If a third thread is ever added, it's safe by default without anyone having to
     remember to demote it. `mlockall()` is process-wide, so which thread calls it doesn't
     matter and stays unaffected by this split.
+- **DECIDED (2026-10-29): unit files (plan.md C13, F9, F11).**
+  - *User.* All three daemons run as one system user, `dspunit`, not root. A system UID
+    is never subject to logind's `RemoveIPC`, and `DynamicUser=` isn't used because it
+    implies `RemoveIPC=yes`. audiod adds `SupplementaryGroups=audio`, `LimitRTPRIO=80`
+    and `LimitMEMLOCK=infinity`. Segments are mode 0600. rt-tune.service stays root.
+  - *Device.* audiod is `BindsTo=`/`After=dev-umc202hd.device` and
+    `WantedBy=dev-umc202hd.device`, so an unplug stops it and a replug starts it again.
+    The device unit comes from a udev rule in os/ that tags the ALSA card.
+  - *Tuning.* audiod `Wants=`/`After=rt-tune.service` for now, so a spurious rt-tune
+    failure costs jitter, not all audio. It moves to `Requires=` once rt-tune.sh fails
+    only on real tuning failures.
 - No outbound networking (graded boundary, CLAUDE.md), **for the deployed product.**
   `os/nftables.conf` accepts inbound traffic only from the LAN subnet, and only to two
   ports: the UI port and SSH. SSH is there for `make deploy` and is key-only
@@ -252,8 +288,11 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
 - **audiod dies:** no GPIO mute pin exists on the UMC202HD, so audiod mutes by writing
   silence to the ALSA playback buffer before teardown, and after restart stays muted until
   the unmute gate below passes. This protects drivers from pops and DC without a hardware
-  mute line. **Known gap:** this only covers a clean exit path -- if audiod hangs rather
-  than exiting, nothing writes silence until systemd's watchdog kills and restarts it.
+  mute line. The silence write only covers a clean exit. A crash (SIGSEGV, SIGKILL) or a
+  hang is covered by `stop_threshold` = buffer size (§1): the playback stream underruns
+  and stops within about 1 ms. A hang also trips the watchdog thread's stall exit (§2).
+  **Still open:** whether the UMC202HD pops when its OUT stream stops (issues.md C14). If
+  it does, playback switches to free-running silence fill (plan.md C14).
 - **xrun:** detect it via `snd_pcm_status` on either PCM, count it in the status block,
   and log from a non-RT thread. Recovery stops and relocks **both** capture and playback
   through the start sequence in §1 (`snd_pcm_prepare` both, start capture, let it settle,
@@ -295,7 +334,8 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
     - Any xrun returns to MUTED, and (b) re-runs after the relock. (c) stays satisfied for
       the life of the process.
     - A non-finite output sample mutes on that period.
-    - Unrecoverable exits keep the silence-on-teardown above. Crash and hang gaps are C14.
+    - Unrecoverable exits keep the silence-on-teardown above. Crashes and hangs rely on
+      the stream thresholds and the stall exit (plan.md C14).
   - *Between processes.* The status block carries `mute_state` and a `mute_reason`
     bitmask (`WAIT_LOCK | WAIT_SELFCHECK | WAIT_PARAMS`), so ctld and ui can show why the
     output is muted. After an audiod restart, ctld and analyzerd republish their current
@@ -310,6 +350,21 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
     stops restart storms, and `RestartPreventExitStatus` covers config errors, where
     restarting won't help. A process that hangs misses its watchdog ping and gets killed
     and restarted the same way.
+  - *audiod's exit codes* (plan.md F10). 1 is internal, 10-19 restart, 20-29 are config
+    errors. Signal deaths restart.
+
+    | Code | Meaning | Restart? |
+    |---|---|---|
+    | 0 | clean stop (SIGTERM) | no |
+    | 1 | unexpected/internal error, incl. `-EBUSY` on open | yes |
+    | 10 | device lost mid-run (`-ENODEV`) | yes |
+    | 11 | relock failed N times in a row | yes |
+    | 12 | RT thread stalled (watchdog-thread backstop) | yes |
+    | 20 | rate, period or format negotiation failed | no |
+    | 21 | an shm segment can't be unlinked (`-EACCES`/`-EPERM`) | no |
+    | 22 | RT setup failed: sched, affinity or `mlockall` | no |
+
+    `RestartPreventExitStatus=20 21 22`.
   - Corrupt shm is *not* unrecoverable: a restart would find the same segment, so audiod
     repairs it instead (below). The one shm config error is a segment audiod can't
     unlink (`-EACCES`/`-EPERM`).

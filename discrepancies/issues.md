@@ -26,7 +26,9 @@ Legend:
 - **SOFT:** work can start, but this must be decided before the component is done.
 - **PROPOSED:** a recommendation only. It isn't decided.
 
-F8 was decided by C12 and is now in plan.md.
+F8 was decided by C12 and is now in plan.md. C15, F2 and D2 were settled on 2026-10-29 and
+have left this file. Hazel's sides of C13, C14, C16, F1, F9, F10 (audiod) and F11 were
+decided the same day and are in plan.md; only the remaining parts are listed below.
 
 IDs are kept from the earlier version (C8-C17, D1-D4, F1-F12; F3 became H1-H4) so
 references elsewhere still work. `:NN` references are to ProposedStructure.md unless
@@ -87,67 +89,40 @@ the other side reviews.
 
 ## 2. audiod
 
-- **[Hazel + Aaron]** **C13. A missing or lost device leaves audio down for good.** Aaron
-  owns the udev rule (os/); Hazel owns the audiod.service dependency. Nothing orders
-  audiod after the ALSA card exists. If the UMC202HD is late or unplugged, audiod reports
-  "device lost" and restarts repeatedly until `StartLimitBurst` stops it. Audio then
-  stays down with no recovery path. dsp:275 mentions hotplug, but no doc says what
-  happens then. **PROPOSED:** a udev rule (os/) that tags the card `TAG+="systemd"` with
-  a stable `SYSTEMD_ALIAS`, plus `BindsTo=`/`After=` on that device unit in audiod.service.
-- **[Hazel; HW: Aaron]** **[HW CHECK] C14. Muting on crash and on stream stop is
-  undefined.** §5 covers a clean exit and calls out a hang. Still undefined:
-  - A SIGSEGV or a watchdog SIGKILL also skips the silence write.
-  - What the UMC202HD outputs when the USB OUT stream stops: silence, or a pop.
-  - What the ALSA `sw_params` (`stop_threshold`) do on underrun. With the defaults the
-    stream stops on underrun, so the "hang" gap is actually short. Set these on purpose.
+- **[Aaron]** **C13. The udev rule for the UMC202HD.** Hazel's half is decided (plan.md
+  C13): audiod.service is `BindsTo=`, `After=` and `WantedBy=dev-umc202hd.device`. Still
+  needed from os/:
+  - A udev rule that matches the ALSA **card** device (`SUBSYSTEM=="sound"`,
+    `KERNEL=="card*"`) on the UMC202HD's USB IDs (from `lsusb` on the Pi). It sets
+    `TAG+="systemd"` and a `SYSTEMD_ALIAS` of `/dev/umc202hd`.
+    - Match the card, not the USB device, so the device unit goes active only once the
+      PCMs exist.
+    - No `SYSTEMD_WANTS` is needed, because of the `WantedBy=`.
+  - **[HW CHECK]** Once audiod runs, unplug the UMC202HD and paste the journal. It should
+    show whether a restart after exit 10 is dropped (the bound device is inactive), and
+    that the restart doesn't count toward `StartLimitBurst`.
+- **[Aaron]** **[HW CHECK] C14. Does the UMC202HD pop when its OUT stream stops?** The
+  code side is decided (plan.md C14):
+  - `stop_threshold` = buffer size, set explicitly;
+  - `start_threshold` = boundary;
+  - a watchdog-thread stall exit.
 
-  **PROPOSED:**
-  - **Threshold.** Set `stop_threshold` = buffer size explicitly, so a hung audiod
-    underruns and the stream stops within about 1 ms (48 frames × 2 periods at 96 kHz).
-    This needs no other process.
-  - **Watchdog thread as a backstop.** audiod's non-RT watchdog thread already reads the
-    status heartbeat. If the heartbeat stalls for a few periods, it:
-    - calls `snd_pcm_drop` on playback;
-    - logs why;
-    - stops sending `WATCHDOG=1`, so systemd still kills and restarts audiod.
-
-    That reaches a known stopped state in milliseconds, not after `WatchdogSec=10`. If the
-    RT thread resumes, its next ALSA call fails, it takes the C4 relock path, and the C11
-    gate re-mutes. Before relying on this, check whether alsa-lib allows a second thread
-    to call `snd_pcm_drop` on a `hw:` handle the RT thread is using (per-handle locking).
-  - **No silence writer in systemd.** `ExecStopPost=` runs after any exit or watchdog
-    kill, but by then the kernel has closed the PCM fd and stopped the stream. Any pop
-    has already happened. Playing zeros there would also mean opening `hw:` and starting
-    a new OUT stream, which is another possible transient, and it delays the restart.
-    systemd can't act at all during a hang until `WatchdogSec` expires.
-
-  Whether the UMC202HD pops when its OUT stream stops still needs a check on the
-  hardware. It decides how much the two mechanisms above matter.
-- **[Hazel]** **C15. Sample-rate negotiation has no failure rule.** The rate is
-  "negotiated … target 96 kHz" (:27, dsp:45). If hw_params returns a different rate,
-  every constant shifts: period length in ms, FFT window, ring length in seconds, and
-  biquad design. **PROPOSED:** anything other than 96 kHz with 48 or 96 frames is a
-  config error with a distinct exit code listed in `RestartPreventExitStatus` (see F10).
-- **[Hazel; HW: Aaron]** **[HW CHECK] C16. The sample-format conversion point isn't
-  specified.** UMC202HD capture is likely S24_3LE or S32_LE (confirm with
-  `/proc/asound/card*/stream0` on the Pi). The ring holds float32 and the biquads use
-  float64. **PROPOSED:** convert in the RT loop (int → float64 for the biquads, float32
-  into the ring), with a switch on whichever format hw_params negotiated.
-- **[Hazel; HW: Aaron]** **[HW CHECK] F1. Polling with no syscall (mechanism B) is
-  probably not true on arm64. SOFT.**
-  - ProposedStructure.md:92-100 and rework.md's B entry say audiod reads the hw pointer
-    "directly in memory" with "no syscall per check" (decision C1, plan.md).
+  Record the analog output (scope, or a recording on another device) while an
+  `aplay -D hw:<card>` of silence is stopped, once with Ctrl-C and once with `kill -9`.
+  If it pops, Hazel switches playback to free-running silence fill (plan.md C14).
+- **[Aaron]** **[HW CHECK] C16. Which sample format does the UMC202HD negotiate?** The
+  code side is decided (plan.md C16): S32_LE, S24_3LE or S24_LE, with the conversion
+  picked once per lock. Paste `/proc/asound/card*/stream0` from the Pi, for both capture
+  and playback.
+- **[Aaron]** **[HW CHECK] F1. Is each hw-pointer check a syscall on arm64?** The code
+  side is decided (plan.md F1): the poll is time-gated, so the loop is correct either way.
   - As far as I know, the kernel allows mmap of the PCM status/control pages only on
     x86/PPC/Alpha. On arm64, alsa-lib falls back to the `SNDRV_PCM_IOCTL_SYNC_PTR`
-    ioctl.
-  - If so, every poll check is a syscall that takes the PCM stream lock, which the xHCI
-    IRQ thread also takes (an rt_mutex on PREEMPT_RT).
-  - Polling still works, but the rationale overstates it. Check with `strace -c` on the
-    Pi, or in the Pi kernel's `sound/core/pcm_native.c`, before writing the loop around
-    it.
-- **[Hazel]** **F2. `READY=1` timing is undefined. SOFT.** Before or after both streams
-  are locked? This sets audiod's `TimeoutStartSec` and when units ordered `After=audiod`
-  start. Suggest: after lock.
+    ioctl, which takes the PCM stream lock that the xHCI IRQ thread also takes.
+  - Check with `strace -c -f arecord -M -D hw:<card> ...` on the Pi (`-M` is mmap mode),
+    or in the Pi kernel's `sound/core/pcm_native.c`, and paste the result.
+  - The result tunes the 50 µs margin and the wording of C1's "no syscall per check"
+    rationale (ProposedStructure.md §2, rework.md's B entry).
 - **[Aaron]** **[HW CHECK] H1. Is a 48-frame period accepted?** Left over from decision C2
   (plan.md; Hazel owns the code). Check that snd-usb-audio accepts 48 frames at 96 kHz
   (`snd_pcm_hw_params_get_period_size_min`). If it doesn't, the 96-frame fallback
@@ -173,6 +148,23 @@ the other side reviews.
     the Pi does. No `-ffast-math`, because the biquads and limiter depend on IEEE
     behaviour. After the change, Hazel re-runs `make test`, `make asan` and
     `make memcheck`.
+- **[Aaron; loop side: Hazel]** **[HW CHECK] F14. RT throttling vs. a busy-polling RT
+  thread. SOFT.** (New 2026-10-29.)
+  - audiod's RT thread spins at SCHED_FIFO 80 on core 3 and never sleeps (C1, F1).
+  - RT throttling (`kernel.sched_rt_runtime_us`, default 950000 of every 1000000 µs) caps
+    RT tasks at 95% of each second. The thread could then be held off for up to 50 ms,
+    about 100 periods, which is a guaranteed xrun.
+  - On 6.12+ kernels, the fair-server deadline server may instead run starved CFS tasks
+    (per-CPU kworkers) on core 3. That's shorter, but it still preempts the loop.
+  - `cyclictest` sleeps between samples, so the planned isolation check can't see this.
+  - Check on the Pi and paste:
+    - `uname -r` and `cat /proc/sys/kernel/sched_rt_runtime_us`;
+    - a minimal busy loop under `chrt -f 80 taskset -c 3`, logging any gap over 100 µs
+      for a few minutes.
+  - Then decide between two fixes:
+    - os/ sets `kernel.sched_rt_runtime_us=-1` (Aaron). That removes the safety net for
+      a runaway RT thread, but only on isolated core 3.
+    - The loop yields briefly each period (Hazel).
 
 ## 3. analyzerd
 
@@ -196,18 +188,19 @@ the other side reviews.
 
 - **[Hazel]** **F7. systemd/ ownership isn't recorded. SOFT.** Hazel took systemd/ on
   2026-10-28, but CLAUDE.md's Ownership list doesn't include it yet. Add it there.
-- **[Hazel]** **F9. The service user and permissions are undefined. HARD.** The unit
-  files are Hazel's; creating the user on the Pi is os/ work, so Aaron's. Do the daemons
-  run as root or as a dedicated user? If not root:
-  - audiod needs `LimitRTPRIO=80` (or `CAP_SYS_NICE`) and `SupplementaryGroups=audio`,
-    on top of `LimitMEMLOCK=infinity`.
-  - All three daemons need a shared group for the `/dev/shm` segments.
-  - It should be a *system* user, so logind's `RemoveIPC` never deletes the segments.
-- **[Hazel + Aaron]** **F10. There's no exit-code table. SOFT.** Hazel lists the codes for
-  audiod and analyzerd and puts them in the units' `RestartPreventExitStatus`. Aaron
-  lists the codes for ctld. §5 asks for "a distinct nonzero code" per unrecoverable
-  error, and `RestartPreventExitStatus` needs a list of codes. Neither exists. audiod's
-  list must include the shm config error from C12 (a segment it can't unlink).
+- **[Aaron]** **F9. Create the `dspunit` service user. SOFT.** Decided (plan.md F9): all
+  three daemons run as one system user, `dspunit`, not root. The units add the groups and
+  limits.
+  - Create it in os/ as a *system* user (UID below 1000, no login shell), so logind's
+    `RemoveIPC` never deletes the segments. A `sysusers.d` fragment would keep it
+    versioned.
+  - **[HW CHECK]** Once audiod runs: if it exits 22 because `pthread_setschedparam` fails
+    with `EPERM` despite `LimitRTPRIO=80`, paste the kernel config's
+    `CONFIG_RT_GROUP_SCHED` line.
+- **[Hazel + Aaron]** **F10. Exit codes for analyzerd and ctld. SOFT.** audiod's table is
+  decided (plan.md F10, ProposedStructure.md §5). The scheme is 1 internal, 10-19
+  restart, 20-29 config errors listed in `RestartPreventExitStatus`. Still needed, in the
+  same scheme: analyzerd's codes (Hazel) and ctld's (Aaron).
 - **[Aaron]** **[HW CHECK] F11. rt-tune.service can block audiod over a log line. SOFT.**
   - `os/rt-tune.sh` `die`s if `/xhci_hcd/` matches nothing in /proc/interrupts. Since
     C6, that match only feeds a log message.
@@ -218,9 +211,10 @@ the other side reviews.
     rule).
   - Separately, the script runs `systemctl disable --now irqbalance` from inside a boot
     oneshot. Masking irqbalance once at deploy, plus `Conflicts=irqbalance.service` in
-    the unit, avoids changing unit state during boot.
-  - **[Hazel]** Writing `systemd/rt-tune.service` itself, and whether audiod uses
-    `Requires=` or `Wants=` on it.
+    the unit (now decided, plan.md F11), avoids changing unit state during boot.
+  - The unit side is decided (plan.md F11). For now audiod `Wants=` rt-tune.service, and
+    it moves to `Requires=` once this script fails only on real tuning failures (IRQ
+    affinity, governor). So this fix is what lets audiod require tuning.
 - **[Aaron]** **F12. `make deploy` can't ship the daemons yet. SOFT.**
   - There's no aarch64 sysroot for `-lasound`/`-lsystemd` (Makefile:27).
   - Makefile:247 enables `ctld` and `rt-tune.service`, neither of which exists yet.
@@ -241,9 +235,6 @@ the other side reviews.
 - **[Aaron]** **D1. Text overlap in the schematic.** (Schematic.svg is the hardware wiring
   diagram.) Schematic.svg:81 places the "TRS->XLR adapter cables" text at y=460, which is
   the bottom edge of both output boxes (400+60). The text overlaps the box borders.
-- **[Hazel]** **D2. The watchdog doesn't cover exit codes.** (The text describes systemd
-  supervision.) ProposedStructure.md:103 says the watchdog setup "covers … clean exit
-  codes", but exit codes come from the error-handling policy in §5.
 - **[Aaron]** **D3. The audio path works without the mic.**
   rework.md:30 says "nothing here works if either sensor is missing data". Without the
   mic, only the analyzer freezes (§4 gate).
@@ -272,18 +263,17 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - C15;
-  - the code side of C14, C16 and F1;
-  - F2, F5 and F6;
-  - systemd/: F7, F9, the audiod.service half of C13, the rt-tune.service unit in
-    F11, and the audiod/analyzerd codes in F10;
-  - D2 and D4;
+  - F5 and F6;
+  - the loop side of F14, once Aaron's check is in;
+  - systemd/: F7 and the analyzerd codes in F10;
+  - D4;
   - the dsp-architecture.png re-export (plan.md).
 - **Aaron:**
-  - the udev rule in C13, C17, F4, the rt-tune.sh part of F11, F12 and F13;
+  - the udev rule and unplug check in C13, C17, F4, the rt-tune.sh part of F11, F12 and
+    F13;
   - H1, H2, H3 and H4;
-  - the hardware checks for C14, C16 and F1;
-  - creating the service user (F9) and the ctld codes in F10;
+  - the hardware checks for C14, C16, F1 and F14 (and the os/ sysctl, if chosen);
+  - creating the service user and the EPERM check (F9), and the ctld codes in F10;
   - D1 and D3;
   - the stale text in OsOutline.md, CtldOutline.md, ProposedStructure.md:67, rework.md
     (`nrpacks` wording and its C2/C6 references), the Makefile and os/;
