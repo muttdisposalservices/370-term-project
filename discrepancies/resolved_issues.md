@@ -10,6 +10,8 @@ History only. Nothing here needs action.
   tracked in [issues.md](issues.md).
 - **C8** was decided and implemented on 2026-10-29. Aaron's review of it is tracked in
   issues.md.
+- **C9** was decided and implemented on 2026-10-29. Only Hazel's daemons use the ring, so
+  nothing is left in issues.md.
 
 Line references (`:NN`, `dsp:NN`) point at the files as they were when each issue was
 written, so they no longer match the current files.
@@ -247,6 +249,40 @@ payload size, so the coeff block and the ctld param block share it). Tested in
     and must reattach.
 
 ProposedStructure.md §3 (IPC, analyzerd → audiod) updated to match.
+
+## C9. Decided and implemented (2026-10-29)
+
+**Original text (issues.md §1):** Ring overwrite detection is unspecified. (audiod writes
+the ring, analyzerd reads it.) For the reader to "drop frames" (:90), it has to detect
+that the writer lapped it *while* it was copying (a torn read). src/common includes a
+seqlock (:173), but nothing says whether or how the ring uses it. **PROPOSED:** a
+monotonic 64-bit write counter. The reader copies a chunk, re-reads the counter, and
+discards the chunk if the writer lapped it. No seqlock needed. The generation counter (§5)
+goes in the same header.
+
+**Why the proposal wasn't enough.** A single counter is bumped only *after* the writer
+writes a chunk. A writer that is part-way through overwriting the reader's frames hasn't
+bumped it yet, so the re-read says "not lapped" and a torn chunk gets accepted.
+
+**Decision:** two monotonic 64-bit frame counters, in `src/common/ring.{h,c}` (generic
+over the frame size). Tested in `tests/test_ring.c`, including the mid-push case above.
+- **claim / commit.** The writer stores `claim` before writing a chunk and `commit` after.
+  The reader copies frames below `commit`, then re-reads `claim`. Frame `pos` has been
+  overwritten exactly when `claim > pos + cap`, so the check is exact.
+- **Writer cost.** Two stores and one release fence per period; no syscalls, no waiting.
+- **Reader results.** `-EAGAIN` (not enough data yet), `-EPIPE` (lapped: lost frames are
+  added to `dropped`, and the reader jumps to the newest frame) or `-ESTALE` (audiod
+  restarted). On either of the last two, analyzerd resets its window.
+- **No seqlock.** The claim/commit pair does that job for the ring; the seqlock stays for
+  the status block (C10).
+- **Generation counter.** It lives in the ring header. On restart, audiod's `ring_init`
+  resumes a valid segment under a new gen, keeping the counters monotonic. It replaces a
+  crashed writer's half-written chunk with silence. A segment with a bad header is
+  re-initialised from scratch; recreating it is C12.
+- **Known caveat.** The reader's copy can race the writer's, as in any seqlock-style
+  read. The claim check discards those copies. TSan would flag it; `make` doesn't run TSan.
+
+ProposedStructure.md §3 (IPC, audiod → analyzerd) and §5 (restart policy) updated to match.
 
 ## E. New: issues within images/dsp-architecture.svg. RESOLVED (0cc5520)
 

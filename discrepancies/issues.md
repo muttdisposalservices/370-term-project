@@ -47,13 +47,6 @@ the other side reviews.
     - retry `tbuf_producer_attach` on `-EAGAIN`;
     - reattach on `-ESTALE` from `tbuf_publish`;
     - give the param block a fixed `slot_size`.
-- **[Hazel]** **C9. Ring overwrite detection is unspecified.** (audiod writes the ring,
-  analyzerd reads it.) For the reader to "drop frames" (:90), it has to detect that the
-  writer lapped it *while* it was copying (a torn read). src/common includes a seqlock
-  (:173), but nothing says whether or how the ring uses it. **PROPOSED:** a monotonic
-  64-bit write counter. The reader copies a chunk, re-reads the counter, and discards
-  the chunk if the writer lapped it. No seqlock needed. The generation counter (§5) goes
-  in the same header.
 - **[Hazel]** **C10. Status block consistency is unspecified.** audiod is the writer; Aaron
   reviews as the ctld reader. audiod writes the block 2000 times/s and ctld reads it at
   20 Hz from another process (:105-106, dsp:99, 132). No tearing protection is stated.
@@ -235,7 +228,7 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - C9, C10, C11, C12 and C15;
+  - C10, C11, C12 and C15;
   - the code side of C14, C16 and F1;
   - F2, F5 and F6;
   - systemd/: F7, F8, F9, the audiod.service half of C13, the rt-tune.service unit in

@@ -168,7 +168,10 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   plus analyzer jitter). audiod pushes 48 frames (384 B) per period at 2000 periods/s,
   i.e. 768 KB/s (target period size -- see §3 data-flow rates, 96 frames as fallback).
   If the analyzer falls behind, the *reader* drops frames and counts them. audiod never
-  waits, which keeps the no-drop guarantee intact on the audio path.
+  waits, which keeps the no-drop guarantee intact on the audio path. audiod stores a
+  `claim` counter before writing each chunk and a `commit` counter after it. The reader
+  copies frames below `commit`, then re-checks `claim`: if the writer has reached its
+  frames, even mid-chunk, the copy is discarded (`src/common/ring.c`, resolved_issues.md C9).
 - **analyzerd → audiod:** a **triple-buffered** coefficient block (19 biquads × 5
   float64 coefficients = 760 B; ≤ 1.5 KB/s at the maximum publish rate). analyzerd
   publishes only when an estimate passes its gates (Source loud enough, coherence high
@@ -263,8 +266,8 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     gets killed and restarted the same way.
 - The shm segments (`/dev/shm`) outlive any one process, so a restarted audiod reattaches
   and checks the segment's magic/version. It then resumes on the last-good coefficients
-  instead of coming back flat. A generation counter in the ring tells analyzerd that audiod
-  restarted, so it resets its delay estimate.
+  instead of coming back flat. A generation counter in the ring header tells analyzerd that
+  audiod restarted (`ring_read` returns `-ESTALE`), so it resets its delay estimate.
 
 ## 6. Proposed repo layout
 ```
