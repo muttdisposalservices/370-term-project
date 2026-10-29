@@ -57,11 +57,16 @@ the other side reviews.
   - soakcheck reads status through ctld's socket, not shm, so ctld's "query current
     meters/status" request has to serve it. CtldOutline.md and the Makefile's soakcheck
     comment ("a status-block reader") should say so.
-- **[Hazel]** **C11. Startup defaults are undefined.** Nothing says how audiod behaves
-  before any coefficients exist (fresh shm) or before ctld has published params (limiter
-  threshold, bypass state). audiod boots first, so this window always occurs.
-  **PROPOSED:** compiled-in defaults: flat EQ (unity biquads), limiter on at a
-  conservative fixed threshold, bypass off.
+- **[Aaron]** **C11. Review the startup mute gate from the ctld side.** It's decided (see
+  [resolved_issues.md](resolved_issues.md) C11 and plan.md C11). audiod stays muted until
+  ctld has published one valid param block since audiod started. Confirm ctld can live
+  with:
+  - republishing its full param state after every `-ESTALE` reattach, not only on change,
+    since that is what unmutes a restarted audiod;
+  - the output staying muted while ctld is down;
+  - serving `mute_state`/`mute_reason` from the status block in its meters/status reply.
+
+  CtldOutline.md should say all three.
 - **[Hazel]** **C12. Corrupt shm leads to a crash loop.** audiod creates and recreates the
   segments; Aaron owns ctld's reattach. "Corrupt shm" is classed as unrecoverable, so
   audiod exits and restarts (:159-161). The restarted audiod reattaches to the same
@@ -73,6 +78,10 @@ the other side reviews.
   - analyzerd and ctld only attach, and they reattach when the generation changes.
 
   This also decides unit ordering (F8).
+
+  Related (from C11): ProposedStructure.md §5 says a restarted audiod "resumes on the
+  last-good coefficients" from shm, but `tbuf_init` zeroes the slots. Today that holds
+  only because analyzerd republishes on `-ESTALE`.
 
 ## 2. audiod
 
@@ -90,9 +99,28 @@ the other side reviews.
   - What the ALSA `sw_params` (`stop_threshold`) do on underrun. With the defaults the
     stream stops on underrun, so the "hang" gap is actually short. Set these on purpose.
 
-  **PROPOSED:** set `stop_threshold` = buffer size explicitly, so a hung audiod underruns
-  and the stream stops within about 1 ms. Whether the stop pops needs a check on the
-  hardware.
+  **PROPOSED:**
+  - **Threshold.** Set `stop_threshold` = buffer size explicitly, so a hung audiod
+    underruns and the stream stops within about 1 ms (48 frames × 2 periods at 96 kHz).
+    This needs no other process.
+  - **Watchdog thread as a backstop.** audiod's non-RT watchdog thread already reads the
+    status heartbeat. If the heartbeat stalls for a few periods, it:
+    - calls `snd_pcm_drop` on playback;
+    - logs why;
+    - stops sending `WATCHDOG=1`, so systemd still kills and restarts audiod.
+
+    That reaches a known stopped state in milliseconds, not after `WatchdogSec=10`. If the
+    RT thread resumes, its next ALSA call fails, it takes the C4 relock path, and the C11
+    gate re-mutes. Before relying on this, check whether alsa-lib allows a second thread
+    to call `snd_pcm_drop` on a `hw:` handle the RT thread is using (per-handle locking).
+  - **No silence writer in systemd.** `ExecStopPost=` runs after any exit or watchdog
+    kill, but by then the kernel has closed the PCM fd and stopped the stream. Any pop
+    has already happened. Playing zeros there would also mean opening `hw:` and starting
+    a new OUT stream, which is another possible transient, and it delays the restart.
+    systemd can't act at all during a hang until `WatchdogSec` expires.
+
+  Whether the UMC202HD pops when its OUT stream stops still needs a check on the
+  hardware. It decides how much the two mechanisms above matter.
 - **[Hazel]** **C15. Sample-rate negotiation has no failure rule.** The rate is
   "negotiated … target 96 kHz" (:27, dsp:45). If hw_params returns a different rate,
   every constant shifts: period length in ms, FFT window, ring length in seconds, and
@@ -247,7 +275,7 @@ the other side reviews.
 ## 8. By owner
 
 - **Hazel:**
-  - C11, C12 and C15;
+  - C12 and C15;
   - the code side of C14, C16 and F1;
   - F2, F5 and F6;
   - systemd/: F7, F8, F9, the audiod.service half of C13, the rt-tune.service unit in
@@ -262,4 +290,4 @@ the other side reviews.
   - D1 and D3;
   - the stale text in OsOutline.md, CtldOutline.md, ProposedStructure.md:67, rework.md
     (`nrpacks` wording and its C2/C6 references), the Makefile and os/;
-  - review of C8, C10 and C12 from the ctld side.
+  - review of C8, C10, C11 and C12 from the ctld side.

@@ -14,6 +14,8 @@ History only. Nothing here needs action.
   nothing is left in issues.md.
 - **C10** was decided and implemented on 2026-10-29. Aaron's review of it is tracked in
   issues.md.
+- **C11** was decided on 2026-10-29. The decision is restated as a plan entry in
+  [plan.md](plan.md), and Aaron's ctld-side review is tracked in issues.md.
 - **Hazel's stale-text items** (issues.md §7) were fixed on 2026-10-29. Aaron's stale-text
   items are still tracked in issues.md.
 
@@ -327,6 +329,37 @@ re-check is removed.
   check discards those copies. TSan would flag it; `make` doesn't run TSan.
 
 ProposedStructure.md §3 (IPC, audiod → ctld) and Terminology.md (seqlock) updated to match.
+
+## C11. Decided (2026-10-29). See plan.md
+
+**Original text (issues.md §1):** Startup defaults are undefined. Nothing says how audiod
+behaves before any coefficients exist (fresh shm) or before ctld has published params
+(limiter threshold, bypass state). audiod boots first, so this window always occurs.
+**PROPOSED:** compiled-in defaults: flat EQ (unity biquads), limiter on at a conservative
+fixed threshold, bypass off.
+
+**Decision:** the proposal, plus a mute gate. The proposal needed one addition:
+`tbuf_init` zeroes every slot, and an all-zero biquad outputs silence, not a flat
+response. So a fresh slot can never be used as a default.
+- **Defaults.** On every start, audiod's private state is compiled in:
+  - flat EQ (b0 = 1, the rest 0);
+  - limiter on: brickwall, -6 dBFS ceiling, no lookahead;
+  - bypass off;
+  - output muted.
+- **Replacing a default.** A block replaces the state only after `tbuf_consumer_poll`
+  returns 1 and the block validates (finite, stable biquads; finite ceiling ≤ 0 dBFS).
+  Rejected blocks are counted.
+- **Unmute gate.** The output fades in only when all of these hold:
+  - both PCMs are locked;
+  - `SELFCHECK_MS` of clean periods have passed;
+  - ctld has published one valid param block since this audiod started.
+
+  An xrun or a non-finite output sample re-mutes. The status block carries `mute_state`
+  and `mute_reason`.
+- **Restarts.** Producers republish their full state on `-ESTALE`. ctld's republish
+  re-arms the gate, and analyzerd's restores the last accepted coefficients.
+
+ProposedStructure.md §3 (IPC) and §5 updated to match. Work items are in plan.md C11.
 
 ## Stale text (Hazel's items). Fixed (2026-10-29)
 

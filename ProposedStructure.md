@@ -187,9 +187,11 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   dynamics) with ctld as its only producer. A triple buffer allows only one writer, so
   ctld can't share analyzerd's coefficient block. audiod loads both indices once per
   period, so reading stays wait-free. ctld publishes on change, capped at 50/s. Bypass and
-  limits keep working while analyzerd is down.
+  limits keep working while analyzerd is down. After an audiod restart, both producers get
+  `-ESTALE`, reattach and republish their full current state; audiod stays muted until
+  ctld's republish arrives (§5, C11).
 - **audiod → ctld:** a meter/status block (peaks, gain reduction, xrun count, heartbeat
-  counter). audiod writes it every period (2000/s target) and ctld samples it at 20 Hz.
+  counter, `mute_state` and `mute_reason`, rejected-block count). audiod writes it every period (2000/s target) and ctld samples it at 20 Hz.
   A single-writer seqlock (`src/common/seqlock.h`) protects it from torn reads. Its
   other reader is audiod's own watchdog thread. soakcheck reads status through ctld's
   socket, not shm (resolved_issues.md C10).
@@ -246,8 +248,8 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
 - **analyzerd dies:** audiod keeps running on the last-good coefficients and systemd
   restarts the analyzer. Audio is unaffected.
 - **audiod dies:** no GPIO mute pin exists on the UMC202HD, so audiod mutes by writing
-  silence to the ALSA playback buffer before teardown, and stays muted until its first
-  good period after restart. This protects drivers from pops and DC without a hardware
+  silence to the ALSA playback buffer before teardown, and after restart stays muted until
+  the unmute gate below passes. This protects drivers from pops and DC without a hardware
   mute line. **Known gap:** this only covers a clean exit path -- if audiod hangs rather
   than exiting, nothing writes silence until systemd's watchdog kills and restarts it.
 - **xrun:** detect it via `snd_pcm_status` on either PCM, count it in the status block,
@@ -258,6 +260,45 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   streaming. The 48 h soak should show zero xruns.
 - The limiter is in audiod, at sample accuracy, after EQ. Protection never depends on the
   analyzer being alive.
+- **Startup defaults and the mute gate (C11, plan.md).** audiod boots before any
+  coefficients or params exist, and `tbuf_init` zeroes every slot. An all-zero biquad
+  outputs silence and an all-zero param block gives a 0 ceiling, so a fresh slot is never
+  used as a default.
+  - *Defaults.* On every start, restarts included, audiod's private state is compiled in,
+    not read from shm:
+    - EQ: flat, all 19 biquads unity (b0 = 1, b1 = b2 = a1 = a2 = 0).
+    - Limiter: on, brickwall peak, -6 dBFS ceiling, no lookahead.
+    - Bypass: off.
+    - Output: muted. audiod still runs the whole chain (capture, EQ, limiter, ring push)
+      and writes zeros to playback, so the self-check measures the real processed output.
+      analyzerd's gates reject what it captures meanwhile.
+  - *Replacing a default.* A block replaces the current state only when
+    `tbuf_consumer_poll` returns 1 and the block validates:
+    - coefficients are all finite and every biquad is stable (|a2| < 1, |a1| < 1 + a2);
+    - the limiter ceiling is finite and ≤ 0 dBFS.
+
+    A block that fails is dropped, counted in the status block, and the current state is
+    kept.
+  - *Unmute gate* (MUTED → FADING_IN → LIVE). All three must hold:
+    - (a) both PCMs are locked through the §1 start sequence;
+    - (b) `SELFCHECK_MS` (proposed 250 ms; may grow once H3 measures the settle time) of
+      consecutive clean periods: no xrun, every capture and processed sample finite, and
+      the |mean| of the processed output under a DC bound;
+    - (c) ctld has published at least one valid param block since this audiod started,
+      so the user's ceiling is in force. While ctld is down the output stays muted.
+
+    Unmuting is a linear gain ramp from 0 to 1 over `FADE_IN_MS` (proposed 20 ms), never a
+    step.
+  - *Re-muting.*
+    - Any xrun returns to MUTED, and (b) re-runs after the relock. (c) stays satisfied for
+      the life of the process.
+    - A non-finite output sample mutes on that period.
+    - Unrecoverable exits keep the silence-on-teardown above. Crash and hang gaps are C14.
+  - *Between processes.* The status block carries `mute_state` and a `mute_reason`
+    bitmask (`WAIT_LOCK | WAIT_SELFCHECK | WAIT_PARAMS`), so ctld and ui can show why the
+    output is muted. After an audiod restart, ctld and analyzerd republish their current
+    state on `-ESTALE` (§3). ctld's republish lifts `WAIT_PARAMS`, and analyzerd's brings
+    back its last accepted coefficients.
 - **Restart policy:** errors fall into two classes.
   - *Recoverable* errors are handled in-process and only counted: xrun, a dropped ring
     frame, a rejected estimate.
@@ -269,7 +310,8 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     gets killed and restarted the same way.
 - The shm segments (`/dev/shm`) outlive any one process, so a restarted audiod reattaches
   and checks the segment's magic/version. It then resumes on the last-good coefficients
-  instead of coming back flat. A generation counter in the ring header tells analyzerd that
+  instead of coming back flat. (`tbuf_init` zeroes the slots, so today this holds only
+  through analyzerd's republish above; see issues.md C12.) A generation counter in the ring header tells analyzerd that
   audiod restarted (`ring_read` returns `-ESTALE`), so it resets its delay estimate.
 
 ## 6. Proposed repo layout

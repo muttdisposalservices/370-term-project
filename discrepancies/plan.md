@@ -1,9 +1,9 @@
-# Plan: decided design changes (2026-10-28)
+# Plan: decided design changes (2026-10-28; C11 added 2026-10-29)
 
 These are the decisions that came out of the docs review. Each one is already written into
 ProposedStructure.md (and the SVGs where noted). This file turns them into work: what to
 build, which component it touches, and what's still outstanding. Entries keep their
-original IDs (C1-C7), because other files refer to them, e.g. `os/rt-tune.sh` and
+original IDs (C1-C7, C11), because other files refer to them, e.g. `os/rt-tune.sh` and
 `os/VERIFY.md` cite "issues.md C6/C7". The original issue text is in
 [resolved_issues.md](resolved_issues.md). Open questions and hardware checks stay in
 [issues.md](issues.md).
@@ -87,6 +87,38 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   printed deploy steps).
 - **Outstanding:** none beyond the `os/VERIFY.md` checklist item.
 
+### C11. Startup defaults and mute gate. Components: audiod, analyzerd, ctld. Owner: Hazel (ctld side: Aaron)
+- **Decided** (ProposedStructure.md §5):
+  - On every start, audiod's private state is compiled in:
+    - flat EQ (unity biquads);
+    - limiter on: brickwall, -6 dBFS ceiling, no lookahead;
+    - bypass off;
+    - output muted.
+  - A fresh shm slot is never used as a default, because `tbuf_init` zeroes slots.
+  - A block replaces the defaults only after `tbuf_consumer_poll` returns 1 and the block
+    validates (finite, stable biquads; finite ceiling ≤ 0 dBFS).
+  - Unmute (MUTED → FADING_IN → LIVE, linear ramp over `FADE_IN_MS`) needs all of:
+    - both PCMs locked (C4);
+    - `SELFCHECK_MS` of clean periods (no xrun, finite samples, DC under bound);
+    - one valid ctld param block since this audiod started.
+  - An xrun or a non-finite output sample re-mutes.
+- **Build:**
+  - In audiod:
+    - the default state;
+    - block validation, with a rejected-block counter;
+    - the mute state machine and fade-in;
+    - `mute_state`/`mute_reason` in the status block.
+  - In analyzerd: on `-ESTALE` from `tbuf_publish`, reattach and republish the last
+    accepted coefficient set.
+  - Tests (shared): flat biquad is unity; zeroed or unstable blocks are rejected; the gate
+    stays muted until all three conditions hold; an xrun re-mutes.
+- **Outstanding:**
+  - `SELFCHECK_MS` (proposed 250 ms) against the settle time from H3 (Aaron).
+  - Aaron's ctld review (issues.md C11): ctld republishes its full param state on every
+    `-ESTALE` reattach, and the output stays muted while ctld is down.
+  - The "last-good coefficients after an audiod restart" claim depends on analyzerd's
+    republish until C12 is decided.
+
 ## Leftover actions from these decisions
 - **Hazel:** re-export `images/dsp-architecture.png` from the SVG after the C1, C5 and C6
   edits. The diagram is Hazel's, though it has been edited jointly.
@@ -100,7 +132,8 @@ These parts depend only on decided items. All of them are Hazel's. Tests are sha
   - RT-thread self-pinning plus `mlockall` (C5);
   - the watchdog/log thread;
   - a passthrough loop that writes silence on teardown;
-  - biquads and the limiter, in src/common with unit tests.
+  - biquads and the limiter, in src/common with unit tests;
+  - the startup defaults, block validation and mute gate (C11).
 - **analyzerd:** GCC-PHAT delay estimation, H(f) smoothing and the EQ solver, as pure
   functions in analysis/*.c files other than main.c, tested on synthetic WAVs. This works
   until main.c lands (issues.md F4).
