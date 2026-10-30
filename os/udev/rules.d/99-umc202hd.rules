@@ -1,0 +1,6 @@
+# os/udev/rules.d/99-umc202hd.rules
+# Tags the UMC202HD's ALSA card device (not the USB device), so the
+# dev-umc202hd.device unit goes active only once the PCMs exist. audiod.service
+# binds to it (issues.md/plan.md C13). USB IDs confirmed via `lsusb` on
+# audioPiCS370: "BEHRINGER International GmbH UMC202HD 192k".
+SUBSYSTEM=="sound", KERNEL=="card*", ATTRS{idVendor}=="1397", ATTRS{idProduct}=="0507", TAG+="systemd", ENV{SYSTEMD_ALIAS}="/dev/umc202hd"

@@ -19,16 +19,18 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   blocking in `poll()`/`snd_pcm_wait()`. Core 3 is isolated for audiod alone, so the CPU
   that blocking would free has no other use.
 - **Build:** the RT loop spins on the hw pointer and never waits on the xHCI IRQ.
-- **Outstanding:** the "no syscall per check" part of the rationale may not hold on
-  arm64 (issues.md F1, a hardware check: Aaron). The loop is time-gated either way (F1
-  below).
+- **Outstanding:** none. **RESOLVED (2026-10-30):** the "no syscall per check" part of
+  the rationale does not hold on arm64 -- confirmed real `SNDRV_PCM_IOCTL_SYNC_PTR` ioctl
+  calls (issues.md F1). The loop is time-gated either way (F1 below); wording corrected
+  in ProposedStructure.md §2 and rework.md's B entry.
 
 ### C2. Period size: 48 frames, falling back to 96. Component: audiod. Owner: Hazel
 - **Decided:** at 96 kHz, 48 frames is 4 USB microframes, 0.5 ms and 2000 periods/s. If
   snd-usb-audio's minimum period rejects 48, use 96 frames (1 ms, 1000 periods/s).
 - **Build:** hw_params tries 48 first, then 96. Anything else is a config error (C15
   below).
-- **Outstanding:** whether the device accepts 48 frames (issues.md H1: Aaron).
+- **Outstanding:** none. **RESOLVED (2026-10-30):** confirmed accepted -- live
+  `period_size: 48` on both capture and playback at 96 kHz (issues.md H1).
 
 ### C3. Latency budget includes USB. Components: analyzerd, verification. Owner: Hazel (analyzerd); Aaron (measurement)
 - **Decided:** plan around **≈6-8 ms total output-path latency**. This is an unverified
@@ -46,8 +48,9 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   - Any xrun, in either direction, stops and relocks both streams through that same
     sequence.
 - **Build:** one start/relock function, shared by startup and every xrun.
-- **Outstanding:** the settle time between starting capture and starting playback
-  (issues.md H3: Aaron).
+- **Outstanding:** none. **RESOLVED (2026-10-30):** ~0 ms -- zero underruns swept across
+  0-1 s of delay, 6 runs (issues.md H3). No deliberate wait needed; capture-then-playback
+  ordering alone suffices.
 
 ### C5. audiod's RT thread pins itself. Components: audiod, systemd. Owner: Hazel
 - **Decided:**
@@ -143,7 +146,8 @@ ctld and os/. Hardware checks on the unit are Aaron's.
     - the gate stays muted until all three conditions hold;
     - an xrun re-mutes.
 - **Outstanding:**
-  - `SELFCHECK_MS` (proposed 250 ms) against the settle time from H3 (Aaron).
+  - `SELFCHECK_MS`: H3 resolved at ~0 ms settle (issues.md H3), so the proposed 250 ms
+    value isn't blocked on it anymore -- fine to finalize.
   - Aaron's ctld review (issues.md C11): ctld republishes its full param state on every
     `-ESTALE` reattach, and the output stays muted while ctld is down.
 
@@ -253,8 +257,8 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   - full-scale scaling (2^-23 and 2^-31);
   - round and clamp at both rails;
   - NaN and ±Inf → 0.
-- **Outstanding:** which format the UMC202HD actually negotiates
-  (`/proc/asound/card*/stream0`, issues.md C16: Aaron). That only decides which path runs
+- **Outstanding:** none. **RESOLVED (2026-10-30):** `S32_LE` (24 bits), both directions;
+  `S24_3LE` isn't offered by this hardware at all (issues.md C16). The S32_LE path runs
   on the unit.
 
 ### F1. The poll is time-gated. Component: audiod. Owner: Hazel (hardware check: Aaron)
@@ -289,9 +293,10 @@ ctld and os/. Hardware checks on the unit are Aaron's.
 
   In every case the window never opens late, it opens at most margin + jitter + 2 µs
   early, and a period is seen within one poll of becoming visible.
-- **Outstanding:** `strace -c` on the Pi (issues.md F1: Aaron). It settles the syscall
-  question and tunes the 50 µs margin, but doesn't change the structure. Reword C1's "no
-  syscall per check" rationale once it lands.
+- **Outstanding:** none. **RESOLVED (2026-10-30):** confirmed real
+  `SNDRV_PCM_IOCTL_SYNC_PTR` ioctl calls on arm64 (356 over a 5 s capture, issues.md F1).
+  Structure unchanged. C1's "no syscall per check" rationale corrected in
+  ProposedStructure.md §2 and rework.md's B entry.
 
 ### F2. READY=1 after lock, before unmute. Components: audiod, systemd. Owner: Hazel
 - **Decided:**

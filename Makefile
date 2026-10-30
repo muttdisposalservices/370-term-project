@@ -32,7 +32,7 @@ CFLAGS     = $(CSTD) -g -Isrc/common -MMD -MP
 ASAN_FLAGS = -fsanitize=address -fno-omit-frame-pointer
 
 LDLIBS_AUDIOD    = -lasound -lsystemd -lpthread -lm
-LDLIBS_CTLD      = -lsystemd -lpthread
+LDLIBS_CTLD      = -lsystemd -lpthread -lm
 LDLIBS_ANALYZERD = -lsystemd -lpthread -lm
 
 NATIVE_DIR = build/native
@@ -54,7 +54,7 @@ ANALYZERD_SRCS = $(ANALYZERD_OWN) $(COMMON_SRCS)
 
 # Testable logic only -- never a daemon's own main.c, so test binaries don't
 # fight over which main() wins.
-TESTABLE_SRCS = $(COMMON_SRCS) $(ANALYZERD_OWN)
+TESTABLE_SRCS = $(COMMON_SRCS) $(filter-out analysis/main.c,$(ANALYZERD_OWN))
 TEST_SRCS     = $(wildcard tests/test_*.c)
 
 native_obj = $(patsubst %.c,$(NATIVE_DIR)/obj/%.o,$(1))
@@ -242,6 +242,8 @@ deploy: check-pi cross
 	@echo "  sudo install -m755 $(DEPLOY_STAGING)/os/rt-tune.sh /usr/local/sbin/rt-tune.sh"
 	@echo "  sudo cp $(DEPLOY_STAGING)/bin/* /usr/local/bin/"
 	@echo "  sudo cp $(DEPLOY_STAGING)/systemd/*.service /etc/systemd/system/"
+	@echo "  sudo cp $(DEPLOY_STAGING)/os/udev/rules.d/*.rules /etc/udev/rules.d/"
+	@echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
 	@echo "  sudo systemctl daemon-reload"
 	@echo "  # TODO: rt-tune.service doesn't exist in systemd/ yet -- add it once it lands"
 	@echo "  sudo systemctl enable --now rt-tune.service audiod analyzerd ctld"

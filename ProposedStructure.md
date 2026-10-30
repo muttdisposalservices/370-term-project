@@ -108,8 +108,10 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   `systemd/rt-tune.service` oneshot, which is ordered before audiod. The Pi's active
   cooler (Components.md) keeps full clock from thermal throttling during the 48 h soak.
 - **The RT loop paces itself by polling, not blocking (mechanism B).** Each period audiod
-  busy-reads the ALSA mmap control page's hw pointer directly in memory instead of calling
-  `poll()`/`snd_pcm_wait()`, so there's no scheduler wakeup round-trip. Core 3 is isolated
+  checks the ALSA hw pointer instead of calling `poll()`/`snd_pcm_wait()`, so there's no
+  scheduler wakeup round-trip. On arm64 that check is a real `SNDRV_PCM_IOCTL_SYNC_PTR`
+  ioctl, not an mmap-only read (confirmed on hardware, issues.md F1) -- the time-gating in
+  F1 below means it only runs a few times per period, not continuously. Core 3 is isolated
   for audiod alone, so there's no other work the CPU time freed by blocking could go to;
   polling spends that time on tighter, more deterministic period-boundary detection
   instead. The xHCI completion IRQ, which now runs on cores 0-1, not core 3 (above),
@@ -245,13 +247,17 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
   middle and copy the new coefficients into private state. It then ramps from the old to the
   new coefficients over that period using only private copies, so it never holds a second
   slot. analyzerd therefore always has a slot of its own to write.
-- **ctld → audiod:** a second **triple-buffered** param block (bypass, limits, presets,
-  dynamics) with ctld as its only producer. A triple buffer allows only one writer, so
-  ctld can't share analyzerd's coefficient block. audiod loads both indices once per
-  period, so reading stays wait-free. ctld publishes on change, capped at 50/s. Bypass and
-  limits keep working while analyzerd is down. After an audiod restart, both producers get
-  `-ESTALE`, reattach and republish their full current state; audiod stays muted until
-  ctld's republish arrives (§5, C11).
+- **ctld → audiod:** a second **triple-buffered** param block, `struct param_block` in
+  `src/common/param.h` (bypass, limiter ceiling in dBFS), with ctld as its only
+  producer. Presets stay entirely on ctld's side: it resolves a preset to concrete
+  bypass/ceiling values before publishing, so audiod never sees a preset id. A triple
+  buffer allows only one writer, so ctld can't share analyzerd's coefficient block.
+  audiod loads both indices once per period, so reading stays wait-free. ctld publishes
+  on change, capped at 50/s. Bypass and limits keep working while analyzerd is down.
+  After an audiod restart, both producers get `-ESTALE`, reattach and republish their
+  full current state; audiod stays muted until ctld's republish arrives and passes
+  `param_valid()` -- magic/version first, so a zeroed (never-published) slot is
+  rejected regardless of what its other fields contain (§5, C11, issues.md C11).
 - **audiod → ctld:** a meter/status block, `struct status_block` in
   `src/common/status.h` (peaks, gain reduction, xrun count, heartbeat counter,
   `mute_state` and `mute_reason`, and separate rejected-block counts for coeff and param

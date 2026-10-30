@@ -55,10 +55,10 @@ crash-consistency story yet. ctld, as the owner of presets, is the natural place
 small on-disk append-only preset/session log that would close this gap. Flagged here as a
 candidate, not a committed decision.
 
-## 7. Socket protocol (sketch, no wire format yet)
-Requests: get preset, set preset, set bypass, set limits, query current meters/status.
-Responses: ack/error for writes, current state for reads. Wire format (framing, encoding)
-is a separate decision once the module split above is agreed.
+## 7. Socket protocol (decided and implemented, 2026-10-29)
+Newline-delimited ASCII, `VERB arg1 arg2...\n`. Implemented in
+`src/common/ctldproto.{h,c}`, tested in `tests/test_ctldproto.c`. Socket I/O itself
+(`src/ctl/main.c`/`sock.c`) is not yet written.
 
 ## 8. Testability split (per the Makefile's existing philosophy)
 The `Makefile`'s `TESTABLE_SRCS` currently covers only `$(COMMON_SRCS)` and

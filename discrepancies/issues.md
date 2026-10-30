@@ -141,19 +141,22 @@ the other side reviews.
   Record the analog output (scope, or a recording on another device) while an
   `aplay -D hw:<card>` of silence is stopped, once with Ctrl-C and once with `kill -9`.
   If it pops, Hazel switches playback to free-running silence fill (plan.md C14).
-- **[Aaron]** **[HW CHECK] C16. Which sample format does the UMC202HD negotiate?** The
-  code side is decided (plan.md C16): S32_LE, S24_3LE or S24_LE, with the conversion
-  picked once per lock. Paste `/proc/asound/card*/stream0` from the Pi, for both capture
-  and playback.
-- **[Aaron]** **[HW CHECK] F1. Is each hw-pointer check a syscall on arm64?** The code
-  side is decided (plan.md F1): the poll is time-gated, so the loop is correct either way.
-  - As far as I know, the kernel allows mmap of the PCM status/control pages only on
-    x86/PPC/Alpha. On arm64, alsa-lib falls back to the `SNDRV_PCM_IOCTL_SYNC_PTR`
-    ioctl, which takes the PCM stream lock that the xHCI IRQ thread also takes.
-  - Check with `strace -c -f arecord -M -D hw:<card> ...` on the Pi (`-M` is mmap mode),
-    or in the Pi kernel's `sound/core/pcm_native.c`, and paste the result.
-  - The result tunes the 50 µs margin and the wording of C1's "no syscall per check"
-    rationale (ProposedStructure.md §2, rework.md's B entry).
+- **[Aaron]** **C16. Which sample format does the UMC202HD negotiate? RESOLVED
+  (2026-10-30), real evidence attached.** `S32_LE` (24 significant bits), both
+  directions. `cat /proc/asound/card2/stream0`: playback Altset 1 = `S32_LE`/24 bits
+  (implicit feedback, synced off the capture endpoint), Altset 2 = `S16_LE`/16 bits
+  (fallback, explicit feedback, not needed); capture Altset 1 = `S32_LE`/24 bits only, no
+  fallback. `S24_3LE` isn't offered by this hardware at all. Confirmed live via
+  `arecord`/`aplay -f S32_LE -r 96000 --dump-hw-params`: both open and run successfully
+  at `Signed 32 bit Little Endian, Rate 96000 Hz, Stereo`.
+- **[Aaron]** **F1. Is each hw-pointer check a syscall on arm64? RESOLVED (2026-10-30),
+  real evidence attached.** Yes, confirmed. `strace -c -f arecord -M -D hw:2,0 -r 96000
+  -c 2 -f S32_LE -d 5 /dev/null`: 356 `ioctl` calls over 5s, 0 errors. Named trace
+  (`strace -f -e trace=ioctl ...`) confirms it's repeated `SNDRV_PCM_IOCTL_SYNC_PTR`
+  calls (16+ in the first 1s alone) after setup (`HW_REFINE`/`HW_PARAMS`/`SW_PARAMS`/
+  `PREPARE`/`START`). arm64 does take the real ioctl fallback, not pure mmap status-page
+  reads. C1's "no syscall per check" wording (ProposedStructure.md §2, rework.md's B
+  entry) needs correcting to reflect a real but poll-gated ioctl cost.
 - **[Aaron]** **H1. Is a 48-frame period accepted? RESOLVED (2026-10-30), real evidence
   attached.** Yes, both directions. Forced `--period-size=48` at 96 kHz/S32_LE on
   `hw:2,0`, then read the live committed params: `/proc/asound/card2/pcm0c/sub0/hw_params`
@@ -162,9 +165,12 @@ the other side reviews.
 - **[Aaron]** **[HW CHECK] H2. What is the real output-path latency?** Left over from
   decision C3 (plan.md). Do the DAC→ADC loopback impulse measurement to replace the
   ≈6-8 ms planning range.
-- **[Aaron]** **[HW CHECK] H3. How long should capture run before playback starts?** Left
-  over from decision C4 (plan.md; Hazel owns the code). Measure the settle time from
-  capture start to playback start that implicit feedback needs.
+- **[Aaron]** **H3. How long should capture run before playback starts? RESOLVED
+  (2026-10-30), real evidence attached.** ~0 ms. Swept delay (0, 0.01, 0.05, 0.1, 0.2,
+  0.5, 1s) between `arecord` start and `aplay` start on `hw:2,0` at 96 kHz/S32_LE, 6 runs
+  total (including delay=0 every time). Zero `underrun!!!` at any delay, all 6 runs. No
+  deliberate settle wait needed in C4's coupled start, just capture-then-playback
+  ordering.
 - **[Aaron]** **F13. Every build is unoptimised (`-O0`). SOFT.** (Makefile; it affects
   audiod's RT loop, which is Hazel's.)
   - `CFLAGS` (Makefile:31) has `-g` but no `-O` level, so native, cross and asan builds
@@ -321,8 +327,9 @@ the other side reviews.
 - **Aaron:**
   - the unplug check in C13 (udev rule resolved 2026-10-30), C17, F4, the rt-tune.sh part
     of F11, F12 and F13;
-  - H2 and H3 (H1 resolved 2026-10-30, H4 resolved 2026-10-29, see §4/§5);
-  - the hardware checks for C14, C16 and F1 (F14 resolved 2026-10-29, see §2);
+  - H2 (H1, H3 resolved 2026-10-30, H4 resolved 2026-10-29, see §4/§5);
+  - the hardware check for C14 (C16, F1 resolved 2026-10-30, F14 resolved 2026-10-29,
+    see §2);
   - creating the service user and the EPERM check (F9), and the ctld codes in F10;
   - D1 and D3;
   - the stale text in OsOutline.md, CtldOutline.md, ProposedStructure.md:67, rework.md
