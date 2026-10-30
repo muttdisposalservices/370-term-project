@@ -122,17 +122,16 @@ the other side reviews.
 ## 2. audiod
 
 - **[Aaron]** **C13. The udev rule for the UMC202HD.** Hazel's half is decided (plan.md
-  C13): audiod.service is `BindsTo=`, `After=` and `WantedBy=dev-umc202hd.device`. Still
-  needed from os/:
-  - A udev rule that matches the ALSA **card** device (`SUBSYSTEM=="sound"`,
-    `KERNEL=="card*"`) on the UMC202HD's USB IDs (from `lsusb` on the Pi). It sets
-    `TAG+="systemd"` and a `SYSTEMD_ALIAS` of `/dev/umc202hd`.
-    - Match the card, not the USB device, so the device unit goes active only once the
-      PCMs exist.
-    - No `SYSTEMD_WANTS` is needed, because of the `WantedBy=`.
-  - **[HW CHECK]** Once audiod runs, unplug the UMC202HD and paste the journal. It should
-    show whether a restart after exit 10 is dropped (the bound device is inactive), and
-    that the restart doesn't count toward `StartLimitBurst`.
+  C13): audiod.service is `BindsTo=`, `After=` and `WantedBy=dev-umc202hd.device`.
+  - **Udev rule: RESOLVED (2026-10-30).** `lsusb`: `1397:0507 BEHRINGER International
+    GmbH UMC202HD 192k`. Rule at `os/udev/rules.d/99-umc202hd.rules`:
+    `SUBSYSTEM=="sound", KERNEL=="card*", ATTRS{idVendor}=="1397", ATTRS{idProduct}=="0507",
+    TAG+="systemd", ENV{SYSTEMD_ALIAS}="/dev/umc202hd"`. `Makefile` `deploy` installs it
+    and reloads/triggers udev.
+  - **[HW CHECK] Still outstanding, blocked on `systemd/audiod.service` (doesn't exist
+    yet).** Once audiod runs, unplug the UMC202HD and paste the journal. It should show
+    whether a restart after exit 10 is dropped (the bound device is inactive), and that
+    the restart doesn't count toward `StartLimitBurst`.
 - **[Aaron]** **[HW CHECK] C14. Does the UMC202HD pop when its OUT stream stops?** The
   code side is decided (plan.md C14):
   - `stop_threshold` = buffer size, set explicitly;
@@ -155,10 +154,11 @@ the other side reviews.
     or in the Pi kernel's `sound/core/pcm_native.c`, and paste the result.
   - The result tunes the 50 µs margin and the wording of C1's "no syscall per check"
     rationale (ProposedStructure.md §2, rework.md's B entry).
-- **[Aaron]** **[HW CHECK] H1. Is a 48-frame period accepted?** Left over from decision C2
-  (plan.md; Hazel owns the code). Check that snd-usb-audio accepts 48 frames at 96 kHz
-  (`snd_pcm_hw_params_get_period_size_min`). If it doesn't, the 96-frame fallback
-  applies.
+- **[Aaron]** **H1. Is a 48-frame period accepted? RESOLVED (2026-10-30), real evidence
+  attached.** Yes, both directions. Forced `--period-size=48` at 96 kHz/S32_LE on
+  `hw:2,0`, then read the live committed params: `/proc/asound/card2/pcm0c/sub0/hw_params`
+  and `pcm0p/sub0/hw_params` both show `rate: 96000 (96000/1)`, `period_size: 48`. No
+  96-frame fallback needed.
 - **[Aaron]** **[HW CHECK] H2. What is the real output-path latency?** Left over from
   decision C3 (plan.md). Do the DAC→ADC loopback impulse measurement to replace the
   ≈6-8 ms planning range.
@@ -319,9 +319,9 @@ the other side reviews.
 ## 8. By owner
 
 - **Aaron:**
-  - the udev rule and unplug check in C13, C17, F4, the rt-tune.sh part of F11, F12 and
-    F13;
-  - H1, H2 and H3 (H4 resolved 2026-10-29, see §4/§5);
+  - the unplug check in C13 (udev rule resolved 2026-10-30), C17, F4, the rt-tune.sh part
+    of F11, F12 and F13;
+  - H2 and H3 (H1 resolved 2026-10-30, H4 resolved 2026-10-29, see §4/§5);
   - the hardware checks for C14, C16 and F1 (F14 resolved 2026-10-29, see §2);
   - creating the service user and the EPERM check (F9), and the ctld codes in F10;
   - D1 and D3;

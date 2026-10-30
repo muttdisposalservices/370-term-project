@@ -169,10 +169,11 @@ ctld and os/. Hardware checks on the unit are Aaron's.
     - The `WantedBy=` above means the rule needs no `SYSTEMD_WANTS`.
 - **Build:** those lines in `systemd/audiod.service`.
 - **Outstanding:**
-  - the udev rule and the card's USB IDs (issues.md C13: Aaron);
-  - on the Pi, unplug while running. audiod may exit 10 (F10) before systemd sees the
-    device go. Confirm the restart is dropped because the bound device is inactive, and
-    that it doesn't count toward `StartLimitBurst`.
+  - udev rule: done (issues.md C13, resolved 2026-10-30);
+  - on the Pi, unplug while running. Blocked on `systemd/audiod.service` existing. audiod
+    may exit 10 (F10) before systemd sees the device go. Confirm the restart is dropped
+    because the bound device is inactive, and that it doesn't count toward
+    `StartLimitBurst`.
 
 ### C14. Stream thresholds and the stall backstop. Component: audiod. Owner: Hazel (hardware check: Aaron)
 - **Decided:**
