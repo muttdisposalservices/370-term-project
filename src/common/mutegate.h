@@ -24,7 +24,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define SELFCHECK_MS 250u /* proposed; may grow once H3 measures the settle time */
+#define SELFCHECK_MS 250u /* H3 resolved at ~0ms settle (issues.md H3); 250ms
+                              not blocked on it, fine as final */
 #define FADE_IN_MS   20u
 #define DC_BOUND     0.01 /* -40 dBFS */
 

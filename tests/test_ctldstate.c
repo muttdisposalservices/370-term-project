@@ -1,4 +1,4 @@
-/* ctld's in-memory preset/param state (src/common/ctldstate.c). */
+/* ctld's in-memory preset/param state (src/ctl/ctldstate.c). */
 #include "test.h"
 #include "ctldstate.h"
 

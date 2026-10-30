@@ -114,8 +114,8 @@ same as before. See `os/VERIFY.md`'s "Known gaps" section.
 ## 7. Testability split (per the Makefile's existing philosophy)
 None of `os/` is covered by `make test`/`make asan`/`make memcheck` — it's boot/firewall/IRQ
 config, not C logic, and holds no code the Makefile's `TESTABLE_SRCS` could ever reference.
-The Makefile's own split (`src/common/`+`analysis/` unit-testable, daemon glue not) doesn't
-extend here at all; the entire directory's correctness is verified manually, on real
+The Makefile's own split (`src/common/`+`analysis/`+ctld's pure logic in `src/ctl/`
+unit-testable, daemon glue not) doesn't extend here at all; the entire directory's correctness is verified manually, on real
 hardware, after `make deploy`, via `os/VERIFY.md`'s checklist — never asserted from a verbal
 description, per `CLAUDE.md`.
 

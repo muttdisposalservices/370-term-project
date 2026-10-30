@@ -57,19 +57,22 @@ candidate, not a committed decision.
 
 ## 7. Socket protocol (decided and implemented, 2026-10-29)
 Newline-delimited ASCII, `VERB arg1 arg2...\n`. Implemented in
-`src/common/ctldproto.{h,c}`, tested in `tests/test_ctldproto.c`. Socket I/O itself
+`src/ctl/ctldproto.{h,c}`, tested in `tests/test_ctldproto.c`. Socket I/O itself
 (`src/ctl/main.c`/`sock.c`) is not yet written.
 
 ## 8. Testability split (per the Makefile's existing philosophy)
-The `Makefile`'s `TESTABLE_SRCS` currently covers only `$(COMMON_SRCS)` and
-`$(ANALYZERD_OWN)` — not `CTLD_OWN`. Its header comment is explicit: logic that needs unit
-testing belongs in `src/common/` (or `analysis/`), never behind syscalls like `sd_notify`,
-so that `make test` / `make asan` / `make memcheck` can run with no Pi attached. For ctld
-this means:
-- Pure logic — param validation, preset (de)serialization — belongs in `src/common/`, where
-  it's covered by the existing test targets.
-- Socket/event-loop/`sd_notify` glue stays in `src/ctl/main.c` and friends, untestable
-  directly, exercised only via `make soakcheck`.
+**RESOLVED (2026-10-30):** `ctldproto.{h,c}`/`ctldstate.{h,c}` moved to `src/ctl/`, where
+they semantically belong (they're ctld-only -- nothing in audiod or analyzerd ever
+included them, so leaving them in `src/common/` meant those two daemons were compiling
+and linking dead ctld-only code for no reason). `TESTABLE_SRCS` now adds
+`$(filter-out src/ctl/main.c,$(CTLD_OWN))`, mirroring the existing `ANALYZERD_OWN`
+pattern one line above it, and `CFLAGS` gained `-Isrc/ctl` so files outside `src/ctl/`
+(the tests) can still resolve `ctldproto.h`/`ctldstate.h`. For ctld this still means:
+- Pure logic — param validation, preset (de)serialization — lives in `src/ctl/` and is
+  covered by the test targets via the `CTLD_OWN` filter above, same as analyzerd's.
+- Socket/event-loop/`sd_notify` glue stays in `src/ctl/main.c`, filtered out of
+  `TESTABLE_SRCS` by name once it exists, untestable directly, exercised only via
+  `make soakcheck`.
 
 ## 9. Failure / supervision behavior
 Per `ProposedStructure.md` §5, as it applies to ctld:

@@ -28,7 +28,7 @@ CROSS_CC     = $(CROSS_PREFIX)gcc
 # that actually has those libs; not set up/verified yet.
 
 CSTD       = -std=c17 -Wall -Wextra -Werror
-CFLAGS     = $(CSTD) -g -Isrc/common -MMD -MP
+CFLAGS     = $(CSTD) -g -Isrc/common -Isrc/ctl -MMD -MP
 ASAN_FLAGS = -fsanitize=address -fno-omit-frame-pointer
 
 LDLIBS_AUDIOD    = -lasound -lsystemd -lpthread -lm
@@ -54,7 +54,8 @@ ANALYZERD_SRCS = $(ANALYZERD_OWN) $(COMMON_SRCS)
 
 # Testable logic only -- never a daemon's own main.c, so test binaries don't
 # fight over which main() wins.
-TESTABLE_SRCS = $(COMMON_SRCS) $(filter-out analysis/main.c,$(ANALYZERD_OWN))
+TESTABLE_SRCS = $(COMMON_SRCS) $(filter-out analysis/main.c,$(ANALYZERD_OWN)) \
+                 $(filter-out src/ctl/main.c,$(CTLD_OWN))
 TEST_SRCS     = $(wildcard tests/test_*.c)
 
 native_obj = $(patsubst %.c,$(NATIVE_DIR)/obj/%.o,$(1))

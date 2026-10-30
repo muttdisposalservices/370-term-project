@@ -284,8 +284,14 @@ the other side reviews.
 ## 5. Hardware
 
 - **[Aaron]** **[HW CHECK] C17. The preamp gain range is unconfirmed.** §7.1 and dsp:219
-  need 50-60 dB of gain. Check against the UMC202HD spec and on the unit, since the top
-  of that range may exceed what the MIDAS preamp can give.
+  need 50-60 dB of gain. Behringer doesn't publish a knob-range spec for the UMC202HD.
+  - **Partial measurement, Input 2 only (2026-10-30):** XLR mic, +48V, ambient room noise
+    as the test signal, knob full CCW vs full CW, 3s captures: -80.60 dBFS RMS at min,
+    -33.84 dBFS RMS at max. Range: 46.76 dB -- short of the 50-60 dB needed.
+  - Input 1 could not be verified -- repeated attempts gave no measurable change between
+    min and max gain even after confirming the knob affects the live meter, unresolved.
+  - Still open: Input 1 unverified, and 46.76 dB on Input 2 doesn't meet the spec as
+    measured.
 
 ## 6. Minor (doc fixes, re-checked 2026-10-28: all still present)
 

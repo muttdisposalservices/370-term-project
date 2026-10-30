@@ -121,9 +121,10 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
   - **DECIDED (2026-10-29): the poll is time-gated (plan.md F1).** The loop spins on
     `clock_gettime(CLOCK_MONOTONIC)` (vDSO, no syscall) until about 50 µs before the
     predicted boundary, re-anchored every period. Only then does it poll
-    `snd_pcm_avail_update()`, never `snd_pcm_avail()`. On arm64 the hw-pointer check may
-    be an ioctl that takes the stream lock (issues.md F1). If so, this keeps it to a few
-    calls per period.
+    `snd_pcm_avail_update()`, never `snd_pcm_avail()`. On arm64 the hw-pointer check is a
+    real ioctl (`SNDRV_PCM_IOCTL_SYNC_PTR`) that takes the stream lock -- confirmed on
+    hardware (issues.md F1). Time-gating keeps it to a few calls per period, not
+    continuous.
     - The loop gates on the capture PCM's avail.
     - Each re-anchor is backdated by the frames already past the boundary:
       anchor = now − (avail − period) frames. So a late detection (a delayed loop, or
@@ -278,7 +279,7 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
 | Pi 5 → UMC202HD, playback (mono on L + R) | USB isochronous OUT, same rate as capture |
 | RP1 xHCI host ↔ ALSA mmap buffer ↔ audiod | rate set by ALSA period/buffer config (VERIFY round-trip via loopback) |
 | RP1 xHCI completion IRQ (cores 0-1, not core 3) → updates ALSA hw pointer (audiod polls it, never blocks) | rate set by period size (VERIFY in `/proc/interrupts`) |
-| audiod RT loop | target: 48 frames = 0.5 ms, 2000 periods/s (96 frames = 1 ms, 1000 periods/s fallback if snd-usb-audio rejects 48 -- VERIFY against its minimum period, `snd_pcm_hw_params_get_period_size_min`; issues.md H1) |
+| audiod RT loop | 48 frames = 0.5 ms, 2000 periods/s -- confirmed accepted on hardware, both directions (issues.md H1); no 96-frame fallback needed |
 | audiod → SPSC ring | 2000 pushes/s × 384 B = 768 KB/s |
 | ring → analyzerd | ≈ 11.7 analyses/s (hop 8192) |
 | analyzerd → coeff triple buffer | ≤ 1–2 publishes/s, 760 B each, gated |
@@ -361,7 +362,8 @@ if audiod replaces a segment (`src/common/shm.h`, §5, resolved_issues.md C12).
     kept.
   - *Unmute gate* (MUTED → FADING_IN → LIVE). All three must hold:
     - (a) both PCMs are locked through the §1 start sequence;
-    - (b) `SELFCHECK_MS` (proposed 250 ms; may grow once H3 measures the settle time) of
+    - (b) `SELFCHECK_MS` (250 ms; H3 resolved at ~0 ms settle, issues.md H3, so this value
+      isn't blocked on it) of
       consecutive clean periods: no xrun, every capture and processed sample finite, and
       the |mean| of the processed output under a DC bound;
       - The mean is taken over the whole window, under `DC_BOUND` = 0.01 (−40 dBFS). A

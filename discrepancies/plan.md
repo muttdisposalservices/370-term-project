@@ -311,7 +311,8 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   - A relock after an xrun never re-sends READY. The non-RT thread may send `STATUS=`
     lines.
 - **Build:** the sd_notify call in audiod's main.c; `TimeoutStartSec=15s` in the unit.
-- **Outstanding:** none. Raise `TimeoutStartSec` only if H3's settle time needs it.
+- **Outstanding:** none. H3 resolved at ~0 ms settle (issues.md H3), well inside
+  `TimeoutStartSec=15s` -- no raise needed.
 
 ### F9. One system user for all daemons. Components: systemd, os. Owner: Hazel (creating the user: Aaron)
 - **Decided:**

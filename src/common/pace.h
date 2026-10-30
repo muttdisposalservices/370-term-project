@@ -3,8 +3,9 @@
  * The RT loop spins on CLOCK_MONOTONIC (vDSO, no syscall) until
  * pace_poll_from(), about PACE_MARGIN_NS before the predicted boundary, and
  * only then polls snd_pcm_avail_update() on the capture PCM. On arm64 each
- * of those may be an ioctl that takes the stream lock the xHCI IRQ thread
- * also takes (issues.md F1), so this keeps it to a few calls per period.
+ * of those is a real ioctl (SNDRV_PCM_IOCTL_SYNC_PTR) that takes the stream
+ * lock the xHCI IRQ thread also takes -- confirmed on hardware (issues.md
+ * F1), so this keeps it to a few calls per period, not continuous.
  *
  * The prediction is re-anchored at every observed boundary, so drift
  * between the monotonic and audio clocks never carries past one period.
@@ -18,7 +19,9 @@
 
 #include <stdint.h>
 
-#define PACE_MARGIN_NS 50000u /* tuned by the F1 strace check on the Pi */
+#define PACE_MARGIN_NS 50000u /* proposed margin; F1 (issues.md) confirmed the
+                                  ioctl-per-check mechanism this margin covers,
+                                  not a measured value itself */
 
 struct pace {
     uint64_t anchor_ns; /* estimated time of the last period boundary */

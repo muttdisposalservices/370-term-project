@@ -1,4 +1,4 @@
-/* ctld's socket protocol (src/common/ctldproto.c, CtldOutline.md §7). */
+/* ctld's socket protocol (src/ctl/ctldproto.c, CtldOutline.md §7). */
 #include "test.h"
 #include "ctldproto.h"
 

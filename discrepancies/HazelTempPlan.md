@@ -13,10 +13,20 @@ The tree as of 54c43b9:
 **The main finding:** almost none of Aaron's HW checks block code. H1, H3, C16, F1 and
 SELFCHECK_MS only tune constants or decide which already-written path runs. Each of those
 constants already exists as a named placeholder (`PACE_MARGIN_NS`, `SELFCHECK_MS`) or can
-be added as one. Four things are actually blocking:
+be added as one. **Update (2026-10-30, Aaron):** H1, H3, C16 and F1 all landed with real
+evidence -- see issues.md. H1: 48-frame period accepted, both directions. H3: ~0 ms
+settle, no deliberate wait needed. C16: `S32_LE`, `S24_3LE` not offered by the hardware
+at all. F1: confirmed real `SNDRV_PCM_IOCTL_SYNC_PTR` ioctl on arm64, not mmap-only.
+`SELFCHECK_MS` is now unblocked too (plan.md C11). Four things are actually blocking:
 1. The **param-block layout** (Aaron, issues.md C11/C8). Without it, audiod can't size or
-   validate the param segment, so the unmute path can't be finished.
-2. **F4 (Makefile).** analyzerd can't have a main.c yet.
+   validate the param segment, so the unmute path can't be finished. **Update
+   (2026-10-29, Aaron):** landed -- `struct param_block` in `src/common/param.h`
+   (magic/version + bypass + ceiling_dbfs, `param_valid()`/`param_default()`), tested
+   in `tests/test_param.c`, `make test`/`make asan` both pass. See issues.md C11 for
+   the full writeup. Should unblock sizing/validating the param segment and finishing
+   the unmute path -- flag it here if anything about the layout doesn't work for you.
+2. **F4 (Makefile).** analyzerd can't have a main.c yet. **Update (2026-10-29, Aaron):**
+   fixed, see issues.md F4. analyzerd can have a main.c now.
 3. **ctld's socket protocol.** ui and `tools/soakcheck.py` wait on it.
 4. **F12 (sysroot).** There's no cross build or deploy yet.
 
@@ -59,7 +69,8 @@ be added as one. Four things are actually blocking:
 ### 4. audiod's main.c, which builds here but runs fully only on the Pi
 Split it into reviewable pieces:
 1. PCM open plus hw_params/sw_params negotiation (C2, C15, C16, C14) and the exit codes.
-2. The start/relock function (C4). `CAPTURE_SETTLE_MS` is a placeholder until H3.
+2. The start/relock function (C4). `CAPTURE_SETTLE_MS` -- H3 resolved at ~0 ms settle
+   (issues.md H3), no deliberate wait needed.
 3. RT-thread self-pin and `mlockall` (C5), with exit 22.
 4. The RT loop: pace spin/poll (F1) → pcmfmt → biquads → limiter → mutegate → ring
    push → status seqlock write → coeff `tbuf_consumer_poll`.
@@ -80,7 +91,11 @@ Split it into reviewable pieces:
 - **analyzerd main.c and moving the pure functions into analysis/:** F4.
 - **ui and tools/soakcheck.py:** ctld's socket protocol.
 - **Switching audiod to `Requires=rt-tune.service`:** F11.
-- **The F14 loop yield:** Aaron's check.
+- **The F14 loop yield:** Aaron's check. **Note (2026-10-29, Aaron):** check came back
+  negative for a fix -- real evidence (0 gaps over 100 µs, 180 s, both idle and with
+  cores 0-2 loaded) says RT throttling doesn't stall the loop in practice, see
+  issues.md F14. Marking this unblocked/no-fix-needed unless you disagree -- flag it if
+  so and we'll re-open it there.
 - **The C14 free-running rework:** only if the pop check says so.
 
 ## Verification (for every chunk)
