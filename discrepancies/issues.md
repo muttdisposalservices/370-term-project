@@ -80,14 +80,29 @@ the other side reviews.
   - serving `mute_state`/`mute_reason` from the status block in its meters/status reply.
 
   CtldOutline.md should say all three.
-  - **New 2026-10-29, for the param-block layout:**
-    - C11's shared tests require that a zeroed block is rejected. A zeroed coeff block
-      fails audiod's validation because of its all-zero numerators
-      (`src/common/biquad.c`).
-    - A zeroed **param** block has nothing like that. If its ceiling field is in dBFS,
-      0 means 0 dBFS (full scale), which passes `limiter_ceiling_valid` (finite, ≤ 0).
-    - So the layout needs a field that a zeroed slot can't satisfy, for example a
-      nonzero magic/version word per slot that audiod checks before anything else.
+  - **Param-block layout: DECIDED and implemented (2026-10-29).** C11's shared tests
+    require that a zeroed block is rejected. A zeroed coeff block fails audiod's
+    validation because of its all-zero numerators (`src/common/biquad.c`); a zeroed
+    **param** block had nothing like that (0 dBFS is a valid, full-scale ceiling, and
+    bypass 0 is a valid state), so the layout needed a field that a zeroed slot can't
+    satisfy.
+    - `struct param_block` (`src/common/param.{h,c}`, tested in `tests/test_param.c`):
+      `magic`, `version`, `bypass` (0/1), an explicit `_reserved` pad (keeps
+      `ceiling_dbfs` 8-byte aligned with no compiler-inserted padding), `ceiling_dbfs`.
+      24 B, size-asserted, no implicit padding -- same style as `struct status_block`.
+    - `param_valid()` checks `magic == PARAM_MAGIC && version == PARAM_VERSION`
+      *before* the field-level checks (bypass in {0,1}, `limiter_ceiling_valid`), so a
+      zeroed `tbuf` slot (`magic == 0`) is rejected regardless of what the other fields
+      happen to contain.
+    - Only carries `bypass` + `ceiling_dbfs`, not a preset id: presets are ctld's own
+      concept and resolve to these concrete values before publishing, so audiod never
+      needs to know which preset was active.
+    - `param_default()` gives audiod's compiled-in default (bypass off, -6 dBFS), same
+      role as `eq_flat()` for the coeff block.
+    - Calling `param_valid()` on receipt is audiod's job (plan.md C11); ctld's own
+      publisher just needs to fill every field, including magic/version, on every
+      publish -- starting from `param_default()` and overwriting `bypass`/
+      `ceiling_dbfs` gives that for free.
 - **[Aaron]** **C12. Review the segment lifecycle from the ctld side.** It's decided and
   implemented (see [resolved_issues.md](resolved_issues.md) C12). audiod is the only
   creator; ctld and analyzerd only attach. Review `src/common/shm.h` and the shared
@@ -165,41 +180,43 @@ the other side reviews.
     the Pi does. No `-ffast-math`, because the biquads and limiter depend on IEEE
     behaviour. After the change, Hazel re-runs `make test`, `make asan` and
     `make memcheck`.
-- **[Aaron; loop side: Hazel]** **[HW CHECK] F14. RT throttling vs. a busy-polling RT
-  thread. SOFT.** (New 2026-10-29.)
+- **[Aaron]** **F14. RT throttling vs. a busy-polling RT thread. RESOLVED (2026-10-29),
+  real evidence attached.**
   - audiod's RT thread spins at SCHED_FIFO 80 on core 3 and never sleeps (C1, F1).
-  - RT throttling (`kernel.sched_rt_runtime_us`, default 950000 of every 1000000 µs) caps
-    RT tasks at 95% of each second. The thread could then be held off for up to 50 ms,
-    about 100 periods, which is a guaranteed xrun.
-  - On 6.12+ kernels, the fair-server deadline server may instead run starved CFS tasks
-    (per-CPU kworkers) on core 3. That's shorter, but it still preempts the loop.
-  - `cyclictest` sleeps between samples, so the planned isolation check can't see this.
-  - Check on the Pi and paste:
-    - `uname -r` and `cat /proc/sys/kernel/sched_rt_runtime_us`;
-    - a minimal busy loop under `chrt -f 80 taskset -c 3`, logging any gap over 100 µs
-      for a few minutes.
-  - Then decide between two fixes:
-    - os/ sets `kernel.sched_rt_runtime_us=-1` (Aaron). That removes the safety net for
-      a runaway RT thread, but only on isolated core 3.
-    - The loop yields briefly each period (Hazel).
+    `kernel.sched_rt_runtime_us` caps RT tasks at 95% of each second by default
+    (950000/1000000 µs); the worry was the thread getting held off up to ~50 ms once a
+    second -- a guaranteed xrun -- and that `cyclictest` sleeps between samples, so it
+    can't see this.
+  - Checked on the real Pi 5: `uname -r` is `6.18.50+rpt-rpi-v8-rt`,
+    `sched_rt_runtime_us` is still the unmodified default `950000`.
+  - `os/rt-busycheck.c` (new, standalone, same pattern as rt-tune.sh -- not built by the
+    Makefile) busy-spins on `CLOCK_MONOTONIC` with no syscalls in the hot path (unlike
+    cyclictest), and logs any gap between consecutive reads over 100 µs; it also
+    installs a SIGINT handler so an early stop still prints the summary instead of
+    losing it.
+  - Run as `sudo chrt -f 80 taskset -c 3 ./rt-busycheck 180`. Confirmed mid-run via
+    `ps -o pid,psr,rtprio,cls,comm` that it actually held `PSR=3 RTPRIO=80 CLS=FF`, so
+    this wasn't silently running under weaker conditions than claimed.
+  - Result, two runs: **0 gaps over 100 µs** with the core otherwise idle (180 s,
+    ~4.69 billion samples), and again with cores 0-2 saturated by independent busy loops
+    for the same 180 s (~4.50 billion samples) to simulate real contention elsewhere on
+    the box. Because `CLOCK_MONOTONIC` keeps advancing regardless of which task is
+    scheduled, any forced de-scheduling of this thread -- RT throttle, fair-server,
+    anything -- would show up directly as a gap on the next sample once it resumes. None
+    did, under either condition.
+  - Conclusion: on this kernel, with core 3 isolated for audiod's RT thread alone
+    (`isolcpus=3`, and rt-tune.sh moves every other IRQ off it), RT throttling does not
+    stall the loop in practice at the default `sched_rt_runtime_us`. No os/ sysctl change
+    and no loop-side yield are needed.
+  - Caveat: this is 180 s, not the 48-hour soak (CLAUDE.md's test of last resort). If the
+    soak ever shows xruns correlated with throttling, re-open this with that evidence.
 
 ## 3. analyzerd
 
-- **[Aaron]** **F4. The Makefile's test link breaks as soon as analyzerd has a `main.c`.
-  HARD.** (Makefile; it blocks Hazel's analyzerd tests.)
-  - `TESTABLE_SRCS` (Makefile:57) pulls in all of `analysis/*.c`, `main.c` included. This
-    contradicts the Makefile's own header comment ("never a daemon's own main.c").
-  - Test binaries link only `-lm` (Makefile:140, 165). A second `main()`, or any
-    `sd_notify` call, breaks `make test` and `make asan`.
-  - ProposedStructure.md:269 puts the "sd_notify wrapper" in `src/common/`, which every
-    test binary links, so it hits the same problem.
-  - Fix: `filter-out` the main.c, and keep sd_notify out of src/common (or give tests
-    `-lsystemd`).
-  - Related (new 2026-10-29, from F5): `src/common/fft.c` calls `cos`/`sin`, and every
-    src/common object is linked into every daemon. `LDLIBS_CTLD` (Makefile:37) has no
-    `-lm`, so ctld's link fails once `src/ctl/` has sources. Fix: add `-lm` to
-    `LDLIBS_CTLD`, or link src/common as a static archive so each daemon pulls in only
-    the objects it uses.
+- **[Aaron]** **F4. RESOLVED (2026-10-29).** `TESTABLE_SRCS` now filters out
+  `analysis/main.c`; `LDLIBS_CTLD` now includes `-lm`. Verified: `make test`/`make asan`
+  pass clean, and a scratch `analysis/main.c`+`analysis/dummy.c` pair confirmed `main.c`
+  is excluded from every test binary while other analysis files still link and test.
     - Since then, two more src/common objects need libm (2026-10-29, checked with
       `nm -u`): `pcmfmt.o` (`lrint`) and `limiter.o` (`pow`, `expm1`).
     - A static archive wouldn't help ctld if it calls `limiter_ceiling_valid` for param
@@ -301,13 +318,11 @@ the other side reviews.
 
 ## 8. By owner
 
-- **Hazel:**
-  - the loop side of F14, once Aaron's check is in.
 - **Aaron:**
   - the udev rule and unplug check in C13, C17, F4, the rt-tune.sh part of F11, F12 and
     F13;
   - H1, H2 and H3 (H4 resolved 2026-10-29, see §4/§5);
-  - the hardware checks for C14, C16, F1 and F14 (and the os/ sysctl, if chosen);
+  - the hardware checks for C14, C16 and F1 (F14 resolved 2026-10-29, see §2);
   - creating the service user and the EPERM check (F9), and the ctld codes in F10;
   - D1 and D3;
   - the stale text in OsOutline.md, CtldOutline.md, ProposedStructure.md:67, rework.md

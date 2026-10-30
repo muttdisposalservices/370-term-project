@@ -39,3 +39,5 @@ may live there.
 - Multi-file or algorithmic change: plan first, wait for approval.
 - Hardware bugs: paste real evidence (dmesg, timing capture,
 /proc/interrupts). No fixes proposed from a verbal description.
+## Useful bits
+the rasberry pi's hostname: audioPiCS370
