@@ -33,6 +33,9 @@ at all. F1: confirmed real `SNDRV_PCM_IOCTL_SYNC_PTR` ioctl on arm64, not mmap-o
 ## Recommended order (each chunk gets its own plan/approval per CLAUDE.md)
 
 ### 1. Quick wins, fully decided (small, independent)
+- **Note (2026-10-30):** `systemd/` ownership moved to Aaron (resolved_issues.md F15).
+  Writing these three unit files is now his; the `Wants=`/`Requires=` call on
+  `audiod.service` (F11) still follows Hazel's read of audiod's reliability.
 - `systemd/audiod.service`: C5, C13, F2, F8, F9, F10, F11 (`Wants=` rt-tune for now).
 - `systemd/rt-tune.service`: F11.
 - `systemd/analyzerd.service`: F6, F8, F9, F10 (`RestartPreventExitStatus=21`).

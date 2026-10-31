@@ -82,7 +82,7 @@ Everything in this section is versioned under `os/` and `systemd/` and installed
     automatically -- see `os/VERIFY.md`). This catches a deploy where the Pi silently boots
     a non-RT kernel.
   - Confirm the benefit by measurement: `cyclictest` worst-case latency on core 3 under
-    load must sit well below the ~0.67 ms period (target < 100 µs). Forum reports show
+    load must sit well below the 0.5 ms period (target < 100 µs). Forum reports show
     no gain in some setups, so don't assume one.
   - Fallback if no usable package exists: build the Pi kernel with
     `bcm2712_rt_defconfig` (RT is in the source tree since 6.12, so no patches are

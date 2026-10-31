@@ -5,7 +5,7 @@
 set -eu
 
 OTHER_CORES="0-1"          # core 2 is analyzerd's; core 3 is audiod's RT thread only --
-                           # no IRQ, including xhci_hcd, is pinned there (issues.md C6)
+                           # no IRQ, including xhci_hcd, is pinned there (plan.md C6)
 
 log() { echo "rt-tune: $*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
@@ -28,7 +28,7 @@ set_affinity() {
 ALL_IRQS=$(awk -F: '/^ *[0-9]+:/ {gsub(/^[ \t]+/,"",$1); print $1}' /proc/interrupts)
 for irq in $ALL_IRQS; do
     case " $XHCI_IRQS " in
-        *" $irq "*) log "moving xhci irq $irq to cores $OTHER_CORES (not core 3 -- issues.md C6)" ;;
+        *" $irq "*) log "moving xhci irq $irq to cores $OTHER_CORES (not core 3 -- plan.md C6)" ;;
     esac
     set_affinity "$irq" "$OTHER_CORES"
 done

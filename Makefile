@@ -257,7 +257,7 @@ deploy: check-pi cross
 	@echo "  # lock out the only SSH path (see os/VERIFY.md)"
 	@echo "  # Only enable this after the RT kernel is already installed+held via apt --"
 	@echo "  # this firewall drops outbound, so apt won't work once it's on"
-	@echo "  # (bootstrap-before-firewall ordering: ProposedStructure.md §2, issues.md C7)"
+	@echo "  # (bootstrap-before-firewall ordering: ProposedStructure.md §2, plan.md C7)"
 	@echo "  sudo cp $(DEPLOY_STAGING)/os/nftables.conf /etc/nftables.conf"
 	@echo "  sudo systemctl enable --now nftables"
 	@echo ""

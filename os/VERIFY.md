@@ -65,7 +65,7 @@ config, not C logic. Every item below must be checked with pasted real output
 - [x] `os/rt-tune.sh` re-run twice produces no errors (idempotency) -- confirmed, two
       consecutive runs produced identical output.
 - [x] Real `/proc/interrupts` paste confirms the xHCI IRQ(s) land on CPU0/CPU1 and that
-      RP1's affinity is settable for them (issues.md C6) -- confirmed for both xHCI IRQs
+      RP1's affinity is settable for them (plan.md C6) -- confirmed for both xHCI IRQs
       (130, 135). See the "Known gaps" section above for the other IRQs that can't be
       moved -- expected, not a bug.
 - [x] UMC202HD's "clock source N is not valid" USB quirk is actually closed on this
@@ -75,7 +75,7 @@ config, not C logic. Every item below must be checked with pasted real output
       genuinely new enumeration (new USB device number assigned). See Components.md/
       ProposedStructure.md §1.
 - [x] RT kernel package was installed via apt and held *before* `nftables` was ever
-      enabled (issues.md C7) -- confirmed via real shell history
+      enabled (plan.md C7) -- confirmed via real shell history
       (`history | grep -nE "apt (install|mark)|nft"`): line 3 is
       `sudo apt install linux-image-rpi-v8-rt`, and **no `nft` command has ever been run
       on this Pi** -- `os/nftables.conf` hasn't been enabled yet at all, so the required

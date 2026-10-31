@@ -7,12 +7,13 @@ writes and is the only producer of the `ctld → audiod` param block. It samples
 status block at 20 Hz and serves meters to `ui` (`ProposedStructure.md` §3). Lang/placement:
 C17, `src/ctl/`, `SCHED_OTHER`, cores 0-1.
 
-## 2. Open question (not resolved here)
-The design doc also says ctld "may be folded into the UI backend," in which case `src/ctl/`
-disappears entirely (`Terminology.md`'s own "things to clean up" note). The `Makefile`
-(`CTLD_OWN`, `$(BIN_NATIVE)/ctld`) and the `CLAUDE.md` ownership split ("Aaron: ctld") both
-already treat it as a standalone daemon, and this outline follows that for concreteness —
-but the fold-in alternative is still on the table and this doc does not settle it.
+## 2. ctld is a standalone daemon (settled, resolved_issues.md B12)
+An earlier design option had ctld "folded into the UI backend," which would make `src/ctl/`
+disappear entirely. That option is rejected, not merely deferred: the UI is Python and never
+maps shm (§3), ctld is the sole producer of the shm param block, and CLAUDE.md keeps graded
+mechanisms out of Python and makes ctld C17 and Aaron's. The `Makefile` (`CTLD_OWN`,
+`$(BIN_NATIVE)/ctld`) and the `CLAUDE.md` ownership split ("Aaron: ctld") already treated it
+as a standalone daemon; this section now matches.
 
 ## 3. Responsibilities
 - Serve `ui` requests over a Unix domain socket: presets, limits, bypass, meter queries.

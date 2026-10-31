@@ -8,9 +8,9 @@ e.g. `os/rt-tune.sh` and `os/VERIFY.md` cite "issues.md C6/C7". The original iss
 is in [resolved_issues.md](resolved_issues.md). Open questions and hardware checks stay in
 [issues.md](issues.md).
 
-Owners follow CLAUDE.md's Ownership section. Hazel owns audiod, analyzerd, ui, tools and
-systemd/. Aaron owns the hardware, the Makefile,
-ctld and os/. Hardware checks on the unit are Aaron's.
+Owners follow CLAUDE.md's Ownership section. Hazel owns audiod, analyzerd, ui and tools.
+Aaron owns the Makefile, ctld, os/ and systemd/ (moved from Hazel on 2026-10-30; see
+resolved_issues.md F15). Hardware checks on the unit are Aaron's.
 
 ## Decisions
 
@@ -52,7 +52,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   0-1 s of delay, 6 runs (issues.md H3). No deliberate wait needed; capture-then-playback
   ordering alone suffices.
 
-### C5. audiod's RT thread pins itself. Components: audiod, systemd. Owner: Hazel
+### C5. audiod's RT thread pins itself. Components: audiod, systemd. Owner: Hazel (unit: Aaron)
 - **Decided:**
   - `audiod.service` sets only `LimitMEMLOCK=infinity`, with no
     `CPUAffinity=`/`CPUSchedulingPolicy=`.
@@ -151,7 +151,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   - Aaron's ctld review (issues.md C11): ctld republishes its full param state on every
     `-ESTALE` reattach, and the output stays muted while ctld is down.
 
-### F8. Unit ordering (decided by C12). Component: systemd. Owner: Hazel
+### F8. Unit ordering (decided by C12). Component: systemd. Owner: Aaron
 - **Decided** (resolved_issues.md C12): audiod is the only shm creator, so
   `analyzerd.service` and `ctld.service` get `After=audiod.service` and
   `Wants=audiod.service`. Never `BindsTo=` or `Requires=`: both must survive an audiod
@@ -159,7 +159,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
 - **Build:** those two lines, when the unit files are written (with F9).
 - **Outstanding:** none.
 
-### C13. audiod binds to the UMC202HD's device unit. Component: systemd. Owner: Hazel (udev rule: Aaron)
+### C13. audiod binds to the UMC202HD's device unit. Component: systemd. Owner: Aaron
 - **Decided:**
   - `audiod.service` gets `BindsTo=dev-umc202hd.device` and `After=dev-umc202hd.device`.
     audiod never starts without the card, and systemd stops it when the card goes.
@@ -298,7 +298,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   Structure unchanged. C1's "no syscall per check" rationale corrected in
   ProposedStructure.md §2 and rework.md's B entry.
 
-### F2. READY=1 after lock, before unmute. Components: audiod, systemd. Owner: Hazel
+### F2. READY=1 after lock, before unmute. Components: audiod, systemd. Owner: Hazel (unit: Aaron)
 - **Decided:**
   - audiod sends `READY=1` once all four shm segments exist and both PCMs are locked
     through the C4 start sequence. That is before the C11 unmute.
@@ -314,7 +314,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
 - **Outstanding:** none. H3 resolved at ~0 ms settle (issues.md H3), well inside
   `TimeoutStartSec=15s` -- no raise needed.
 
-### F9. One system user for all daemons. Components: systemd, os. Owner: Hazel (creating the user: Aaron)
+### F9. One system user for all daemons. Components: systemd, os. Owner: Aaron
 - **Decided:**
   - audiod, analyzerd and ctld run as one dedicated system user, `dspunit`, not as root.
     - A system UID means logind's `RemoveIPC` never deletes the segments.
@@ -332,7 +332,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
     kernel has `CONFIG_RT_GROUP_SCHED` and audiod's cgroup has no RT budget. Exit 22
     (F10) makes that visible.
 
-### F10 (audiod). Exit codes. Components: audiod, systemd. Owner: Hazel (ctld codes: Aaron)
+### F10 (audiod). Exit codes. Components: audiod, systemd. Owner: Hazel (unit line: Aaron; ctld codes: Aaron)
 - **Decided:** these codes, mirrored in a `src/audio/` header. They avoid 126-127, 128+n
   (signals) and systemd's own 200-243. The scheme: 1 is internal, 10-19 restart, 20-29
   are config errors.
@@ -356,7 +356,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
 - **Outstanding:** ctld's codes (Aaron), in the same scheme (issues.md F10). analyzerd's
   are F10 (analyzerd) below.
 
-### F10 (analyzerd). Exit codes. Components: analyzerd, systemd. Owner: Hazel
+### F10 (analyzerd). Exit codes. Components: analyzerd, systemd. Owner: Hazel (unit line: Aaron)
 - **Decided:** these codes, in audiod's scheme. A code shared with audiod means the same
   thing in both.
 
@@ -392,7 +392,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   path uses it; `RestartPreventExitStatus=21` in `analyzerd.service`.
 - **Outstanding:** none.
 
-### F11 (unit). rt-tune.service, wanted by audiod for now. Component: systemd. Owner: Hazel (rt-tune.sh: Aaron)
+### F11 (unit). rt-tune.service, wanted by audiod for now. Component: systemd. Owner: Aaron
 - **Decided:**
   - `systemd/rt-tune.service`: `Type=oneshot`, `RemainAfterExit=yes`,
     `ExecStart=/usr/local/sbin/rt-tune.sh`, `Before=audiod.service`,
@@ -439,7 +439,7 @@ ctld and os/. Hardware checks on the unit are Aaron's.
 - **Outstanding:** `LDLIBS_CTLD` needs `-lm` before ctld gets sources, because every
   src/common object is linked into every daemon (issues.md F4: Aaron).
 
-### F6. analyzerd runs SCHED_OTHER on core 2. Components: analyzerd, systemd. Owner: Hazel
+### F6. analyzerd runs SCHED_OTHER on core 2. Components: analyzerd, systemd. Owner: Hazel (unit line: Aaron)
 - **Decided:** SCHED_OTHER, not FIFO 10.
   - analyzerd has no hard deadline. A late analysis only makes the correction a little
     stale, since audiod keeps applying the last published coefficients. If it falls far
@@ -461,8 +461,8 @@ ctld and os/. Hardware checks on the unit are Aaron's.
   core 2, try `Nice=-5` (or move that work off core 2) before any RT class.
 
 ## What can start now
-These parts depend only on decided items. All of them are Hazel's. Tests are shared
-(CLAUDE.md "Both").
+These parts depend only on decided items. The audiod and analyzerd items are Hazel's; the
+systemd unit files are Aaron's. Tests are shared (CLAUDE.md "Both").
 - **audiod:**
   - ALSA open and hw_params negotiation (C2);
   - the capture→playback start sequence and coupled xrun relock (C4);

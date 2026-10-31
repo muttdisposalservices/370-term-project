@@ -626,6 +626,15 @@ there.
 The "not yet in CLAUDE.md" notes in issues.md's legend and plan.md's intro are removed.
 Fully closed.
 
+## F15. Closed (2026-10-30)
+
+**Original text:** systemd/ was Hazel's (F7, 2026-10-28). Ownership moved to Aaron on
+2026-10-30.
+
+**Fix:** CLAUDE.md's Ownership section now lists "systemd: system controls" under Aaron.
+issues.md's legend and plan.md's intro and per-entry Owner tags (F8, C13, F2, F9, F10
+audiod/analyzerd, F11, F6) updated to match. Fully closed.
+
 ## Stale text (Hazel's items). Fixed (2026-10-29)
 
 **Original text (issues.md §7):**

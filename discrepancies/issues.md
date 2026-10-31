@@ -7,8 +7,8 @@ This file lists only the issues that still need addressing. Related files:
 
 Legend:
 - **Owner tags** follow CLAUDE.md's Ownership section:
-  - **[Hazel]** owns audiod, analyzerd, ui, tools and systemd/.
-  - **[Aaron]** owns the hardware, the Makefile, ctld and os/.
+  - **[Hazel]** owns audiod, analyzerd, ui and tools.
+  - **[Aaron]** has the hardware, owns the Makefile, ctld, os/ and systemd/.
   - **[Hazel; HW: Aaron]**: Hazel owns the code or decision; Aaron does the check on the
     unit.
   - Doc owners (set 2026-10-28):
@@ -121,8 +121,8 @@ the other side reviews.
 
 ## 2. audiod
 
-- **[Aaron]** **C13. The udev rule for the UMC202HD.** Hazel's half is decided (plan.md
-  C13): audiod.service is `BindsTo=`, `After=` and `WantedBy=dev-umc202hd.device`.
+- **[Aaron]** **C13. The udev rule for the UMC202HD.** The systemd half is decided
+  (plan.md C13): audiod.service is `BindsTo=`, `After=` and `WantedBy=dev-umc202hd.device`.
   - **Udev rule: RESOLVED (2026-10-30).** `lsusb`: `1397:0507 BEHRINGER International
     GmbH UMC202HD 192k`. Rule at `os/udev/rules.d/99-umc202hd.rules`:
     `SUBSYSTEM=="sound", KERNEL=="card*", ATTRS{idVendor}=="1397", ATTRS{idProduct}=="0507",
